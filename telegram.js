@@ -129,17 +129,33 @@ bot.on("message", async (msg) => {
         const tool = actionParts[2];
 
         if (state.action === 'awaiting_link_qrcode' && text) {
+            state.action = 'awaiting_alias_qrcode';
+            state.originalLink = text;
+            await bot.sendMessage(chatId, "✅ Tautan asli diterima. Sekarang, masukkan nama kustom (alias) yang Anda inginkan untuk tautan ini. Nama hanya boleh berisi huruf, angka, dan garis bawah (_).");
+            return;
+        } else if (state.action === 'awaiting_alias_qrcode' && text) {
             try {
-                await bot.sendMessage(chatId, "Tautan diterima. Membuat QR code pelacakan dan menyisipkannya ke gambar, mohon tunggu...");
+                const alias = text.trim();
+                // Validasi alias
+                if (!/^[a-zA-Z0-9_]+$/.test(alias)) {
+                    return bot.sendMessage(chatId, "❌ Format alias tidak valid. Harap gunakan hanya huruf, angka, dan garis bawah (_). Coba lagi.");
+                }
 
-                const originalLink = text;
+                // Cek keunikan alias di database
+                const existingLink = await TrackedLink.findOne({ alias: alias });
+                if (existingLink) {
+                    return bot.sendMessage(chatId, "❌ Nama alias ini sudah digunakan. Silakan pilih nama lain.");
+                }
+
+                await bot.sendMessage(chatId, `Alias "${alias}" tersedia. Membuat QR code pelacakan, mohon tunggu...`);
+
+                const originalLink = state.originalLink;
                 const coverFileId = state.coverFileId;
-                const linkId = crypto.randomBytes(8).toString('hex');
-                const trackableUrl = `${config.botBaseUrl}/track/${linkId}`;
+                const trackableUrl = `${config.botBaseUrl}/track/${alias}`;
 
                 // Simpan ke database
                 const newTrackedLink = new TrackedLink({
-                    linkId: linkId,
+                    alias: alias,
                     creatorChatId: chatId,
                     originalLink: originalLink
                 });

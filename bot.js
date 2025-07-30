@@ -30,10 +30,10 @@ app.get('/live-chat/admin/:chatId', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'admin-chat.html'));
 });
 
-app.get('/track/:linkId', async (req, res) => {
+app.get('/track/:alias', async (req, res) => {
     try {
-        const { linkId } = req.params;
-        const linkData = await TrackedLink.findOne({ linkId: linkId });
+        const { alias } = req.params;
+        const linkData = await TrackedLink.findOne({ alias: alias });
 
         if (!linkData) {
             return res.status(404).send('Tautan tidak ditemukan atau telah kedaluwarsa.');
