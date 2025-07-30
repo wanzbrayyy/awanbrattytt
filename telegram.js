@@ -11,6 +11,9 @@ const Transaction = require('./models/transaction');
 const Userbot = require('./models/userbot');
 const { TDL } = require('@telepilotco/tdl');
 const moment = require("moment");
+const { exec } = require('child_process');
+const crypto = require('crypto');
+const TrackedLink = require('./models/trackedLink');
 const { createInlineKeyboard, isAdmin, sendStartMessage, showProductDetail } = require('./utils');
 const natural = require('natural');
 
@@ -119,6 +122,125 @@ bot.on("message", async (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     const text = msg.text;
+
+    const state = userStates[chatId];
+    if (state && state.action && state.action.startsWith('awaiting_')) {
+        const actionParts = state.action.split('_');
+        const tool = actionParts[2];
+
+        if (state.action === 'awaiting_link_qrcode' && text) {
+            try {
+                await bot.sendMessage(chatId, "Tautan diterima. Membuat QR code pelacakan dan menyisipkannya ke gambar, mohon tunggu...");
+
+                const originalLink = text;
+                const coverFileId = state.coverFileId;
+                const linkId = crypto.randomBytes(8).toString('hex');
+                const trackableUrl = `${config.botBaseUrl}/track/${linkId}`;
+
+                // Simpan ke database
+                const newTrackedLink = new TrackedLink({
+                    linkId: linkId,
+                    creatorChatId: chatId,
+                    originalLink: originalLink
+                });
+                await newTrackedLink.save();
+
+                const tempDir = path.join(__dirname, 'temp', chatId.toString());
+                if (!fs.existsSync(tempDir)) {
+                    fs.mkdirSync(tempDir, { recursive: true });
+                }
+                const coverPath = path.join(tempDir, 'cover.jpg');
+                const qrPath = path.join(tempDir, 'qr.png');
+                const outputPath = path.join(tempDir, 'output_qr.jpg');
+
+                const coverLink = await bot.getFileLink(coverFileId);
+                await downloadFile(coverLink, coverPath);
+
+                const qrCommand = `qrencode -o "${qrPath}" "${trackableUrl}"`;
+                exec(qrCommand, (qrError, qrStdout, qrStderr) => {
+                    if (qrError) {
+                        console.error(`QREncode Error: ${qrStderr}`);
+                        bot.sendMessage(chatId, 'Gagal membuat QR code.');
+                        fs.rmSync(tempDir, { recursive: true, force: true });
+                        delete userStates[chatId];
+                        return;
+                    }
+
+                    const compositeCommand = `composite -gravity center "${qrPath}" "${coverPath}" "${outputPath}"`;
+                    exec(compositeCommand, async (compError, compStdout, compStderr) => {
+                        if (compError) {
+                            console.error(`Composite Error: ${compStderr}`);
+                            bot.sendMessage(chatId, 'Gagal menyisipkan QR code ke gambar.');
+                            fs.rmSync(tempDir, { recursive: true, force: true });
+                            delete userStates[chatId];
+                            return;
+                        }
+
+                        await bot.sendDocument(chatId, outputPath, {}, {
+                            caption: "Berikut adalah gambar Anda yang telah disisipi QR code pelacakan."
+                        });
+
+                        fs.rmSync(tempDir, { recursive: true, force: true });
+                        delete userStates[chatId];
+                    });
+                });
+
+            } catch (e) {
+                console.error("Gagal dalam proses qrcode:", e);
+                bot.sendMessage(chatId, "Terjadi kesalahan fatal. Silakan coba lagi.");
+                delete userStates[chatId];
+            }
+            return; // Hentikan pemrosesan lebih lanjut untuk pesan ini
+        } else if (state.action === 'awaiting_metadata_exiftool' && text) {
+            try {
+                await bot.sendMessage(chatId, "Metadata diterima. Menerapkannya ke gambar, mohon tunggu...");
+                const metadata = text; // "Author:Jules, Comment:File Rahasia"
+                const coverFileId = state.coverFileId;
+
+                const tempDir = path.join(__dirname, 'temp', chatId.toString());
+                if (!fs.existsSync(tempDir)) {
+                    fs.mkdirSync(tempDir, { recursive: true });
+                }
+                const coverPath = path.join(tempDir, 'cover_exif.jpg');
+                const coverLink = await bot.getFileLink(coverFileId);
+                await downloadFile(coverLink, coverPath);
+
+                // Hapus file asli setelah exiftool membuat backup
+                const originalFileBackup = `${coverPath}_original`;
+
+                const metadataArgs = metadata.split(',').map(part => {
+                    const [key, ...valueParts] = part.split(':');
+                    const value = valueParts.join(':').trim();
+                    return `-ExifTool:${key.trim()}="${value}"`;
+                }).join(' ');
+
+                const command = `exiftool -overwrite_original ${metadataArgs} "${coverPath}"`;
+                exec(command, async (error, stdout, stderr) => {
+                    if (error) {
+                        console.error(`ExifTool Error: ${stderr}`);
+                        bot.sendMessage(chatId, 'Gagal menulis metadata. Pastikan formatnya benar (key:value, key2:value2).');
+                        fs.rmSync(tempDir, { recursive: true, force: true });
+                        delete userStates[chatId];
+                        return;
+                    }
+
+                    await bot.sendDocument(chatId, coverPath, {}, {
+                        caption: "Berikut adalah gambar Anda yang telah diupdate metadatanya."
+                    });
+
+                    fs.rmSync(tempDir, { recursive: true, force: true });
+                    delete userStates[chatId];
+                });
+
+            } catch (e) {
+                console.error("Gagal dalam proses exiftool:", e);
+                bot.sendMessage(chatId, "Terjadi kesalahan fatal. Silakan coba lagi.");
+                delete userStates[chatId];
+            }
+            return;
+        }
+    }
+
 
     // Command handling
     if (text) {
@@ -257,6 +379,81 @@ bot.on("callback_query", async (query) => {
        else if (data === "all_menu") showAllMenu(chatId, isAdmin(userId),  userbotSessions[chatId] != null);
     else if (data === "claim_trial_userbot") claimTrialUserbot(chatId);
     else if (data === "admin_menu") showAdminMenu(chatId);
+    else if (data.startsWith("add_premium_")) {
+        if (!isAdmin(userId)) {
+            return bot.answerCallbackQuery(query.id, { text: 'Perintah ini hanya untuk admin.', show_alert: true });
+        }
+
+        const targetChatId = data.split("_")[2];
+        try {
+            const updatedUser = await User.findOneAndUpdate(
+                { chatId: targetChatId },
+                { $set: { isPremium: true } },
+                { new: true }
+            );
+
+            if (updatedUser) {
+                await bot.answerCallbackQuery(query.id, { text: `Pengguna ${updatedUser.username || targetChatId} telah dijadikan premium.` });
+                await bot.sendMessage(chatId, `✅ Berhasil! Pengguna @${updatedUser.username || targetChatId} sekarang adalah anggota premium.`);
+                await bot.sendMessage(targetChatId, "🎉 Selamat! Akun Anda telah ditingkatkan menjadi Premium. Anda sekarang memiliki akses ke fitur-fitur eksklusif.");
+            } else {
+                await bot.answerCallbackQuery(query.id, { text: 'Gagal menemukan pengguna.', show_alert: true });
+            }
+        } catch (error) {
+            console.error("Gagal menjadikan pengguna premium:", error);
+            await bot.answerCallbackQuery(query.id, { text: 'Terjadi kesalahan.', show_alert: true });
+        }
+    }
+    else if (data === "premium_menu") {
+        const user = await User.findOne({ chatId: userId });
+        if (!user || !user.isPremium) {
+            const nonPremiumText = "Fitur ini hanya untuk Pengguna Premium.\nSilakan hubungi admin @maverick_dark atau gunakan perintah /feedback untuk meminta akses premium.";
+            return bot.answerCallbackQuery(query.id, { text: nonPremiumText, show_alert: true });
+        }
+
+        const premiumMessage = "Selamat datang di Menu Premium! Pilih alat steganografi yang ingin Anda gunakan:";
+        const premiumButtons = [
+            { text: "🖼️ Steghide (Embed File)", callback_data: "steg_steghide" },
+            { text: "✍️ ExifTool (Edit Metadata)", callback_data: "steg_exiftool" },
+            { text: "🗜️ Zip & Rename (Samarkan Arsip)", callback_data: "steg_zip" },
+            { text: "🔗 QR Code (Embed Link)", callback_data: "steg_qrcode" },
+            { text: "⬅️ Kembali", callback_data: "back_to_start" }
+        ];
+
+        await bot.editMessageText(premiumMessage, {
+            chat_id: chatId,
+            message_id: query.message.message_id,
+            reply_markup: createInlineKeyboard(premiumButtons)
+        });
+    }
+    else if (data.startsWith('steg_')) {
+        const user = await User.findOne({ chatId: userId });
+        if (!user || !user.isPremium) {
+            return bot.answerCallbackQuery(query.id, { text: 'Fitur ini hanya untuk pengguna premium.', show_alert: true });
+        }
+
+        const tool = data.split('_')[1];
+        userStates[chatId] = { action: `awaiting_cover_${tool}` };
+
+        let promptMessage = "";
+        switch (tool) {
+            case 'steghide':
+                promptMessage = "Anda memilih Steghide. Silakan kirim gambar (JPG/BMP) yang akan digunakan sebagai sampul.";
+                break;
+            case 'exiftool':
+                promptMessage = "Anda memilih ExifTool. Silakan kirim gambar yang metadatanya ingin Anda ubah.";
+                break;
+            case 'zip':
+                promptMessage = "Anda memilih Zip & Rename. Silakan kirim gambar (JPG) yang akan digunakan sebagai sampul.";
+                break;
+            case 'qrcode':
+                promptMessage = "Anda memilih QR Code. Silakan kirim gambar yang akan disisipi QR code.";
+                break;
+        }
+
+        await bot.sendMessage(chatId, promptMessage);
+        await bot.answerCallbackQuery(query.id);
+    }
     else if (data === "menfess") handleMenfess(chatId);
     else if (data === "confess") handleConfess(chatId);
     else if (data === "saran") handleSaran(chatId);
@@ -1305,6 +1502,168 @@ bot.onText(/\/announce (.+)/, async (msg, match) => {
         console.error("Gagal mengirim pengumuman:", err);
     });
 
+});
+
+bot.on('photo', async (msg) => {
+    const chatId = msg.chat.id;
+    const state = userStates[chatId];
+
+    // Cek apakah pengguna sedang dalam alur fitur premium
+    if (!state || !state.action) return;
+
+    const actionParts = state.action.split('_');
+    if (actionParts[0] !== 'awaiting' || actionParts[1] !== 'cover') {
+        return;
+    }
+
+    const tool = actionParts[2];
+    const photoFileId = msg.photo[msg.photo.length - 1].file_id; // Ambil resolusi tertinggi
+
+    userStates[chatId].coverFileId = photoFileId;
+
+    switch (tool) {
+        case 'steghide':
+            userStates[chatId].action = 'awaiting_embed_file_steghide';
+            bot.sendMessage(chatId, '✅ Gambar sampul diterima. Sekarang, kirimkan file yang ingin Anda sembunyikan di dalamnya (sebagai dokumen).');
+            break;
+        case 'exiftool':
+            userStates[chatId].action = 'awaiting_metadata_exiftool';
+            bot.sendMessage(chatId, '✅ Gambar diterima. Sekarang, kirimkan metadata yang ingin Anda tulis dalam format:\n`key1:value1, key2:value2`\n\nContoh:\n`Author:Jules, Comment:File Rahasia`');
+            break;
+        case 'zip':
+            userStates[chatId].action = 'awaiting_file_zip';
+            bot.sendMessage(chatId, '✅ Gambar sampul diterima. Sekarang, kirimkan file yang ingin Anda samarkan di dalam gambar ini (sebagai dokumen).');
+            break;
+        case 'qrcode':
+            userStates[chatId].action = 'awaiting_link_qrcode';
+            bot.sendMessage(chatId, '✅ Gambar diterima. Sekarang, kirimkan tautan atau teks yang ingin Anda jadikan QR code.');
+            break;
+        default:
+            // Reset state jika ada yang tidak beres
+            delete userStates[chatId];
+            break;
+    }
+});
+
+bot.on('document', async (msg) => {
+    const chatId = msg.chat.id;
+    const state = userStates[chatId];
+
+    if (!state || !state.action) return;
+
+    const actionParts = state.action.split('_');
+    if (actionParts[0] !== 'awaiting' || actionParts[1] !== 'embed' || actionParts[2] !== 'file') {
+        return;
+    }
+
+    const tool = actionParts[3];
+    const docFileId = msg.document.file_id;
+
+    if (tool === 'steghide') {
+        try {
+            await bot.sendMessage(chatId, "File diterima. Memproses gambar, mohon tunggu...");
+
+            // 1. Dapatkan link download untuk kedua file
+            const coverLink = await bot.getFileLink(state.coverFileId);
+            const embedLink = await bot.getFileLink(docFileId);
+
+            // 2. Tentukan path file sementara
+            const tempDir = path.join(__dirname, 'temp', chatId.toString());
+            if (!fs.existsSync(tempDir)) {
+                fs.mkdirSync(tempDir, { recursive: true });
+            }
+            const coverPath = path.join(tempDir, 'cover.jpg');
+            const embedPath = path.join(tempDir, msg.document.file_name);
+            const outputPath = path.join(tempDir, 'output.jpg');
+
+            // 3. Download kedua file
+            await downloadFile(coverLink, coverPath);
+            await downloadFile(embedLink, embedPath);
+
+            // 4. Jalankan perintah steghide
+            const command = `steghide embed -cf "${coverPath}" -ef "${embedPath}" -sf "${outputPath}" -p "" -f`;
+            exec(command, async (error, stdout, stderr) => {
+                if (error) {
+                    console.error(`Steghide Error: ${stderr}`);
+                    bot.sendMessage(chatId, `Terjadi kesalahan saat memproses gambar dengan Steghide. Pastikan gambar sampul adalah JPG/BMP.`);
+                    // Cleanup
+                    fs.rmSync(tempDir, { recursive: true, force: true });
+                    delete userStates[chatId];
+                    return;
+                }
+
+                // 5. Kirim file hasil
+                await bot.sendDocument(chatId, outputPath, {}, {
+                    caption: "Berikut adalah gambar Anda yang telah diproses dengan Steghide."
+                });
+
+                // 6. Hapus file sementara dan reset state
+                fs.rmSync(tempDir, { recursive: true, force: true });
+                delete userStates[chatId];
+            });
+
+        } catch (e) {
+            console.error("Gagal dalam proses steghide:", e);
+            bot.sendMessage(chatId, "Terjadi kesalahan fatal. Silakan coba lagi.");
+            delete userStates[chatId];
+        }
+    } else if (tool === 'zip') {
+        try {
+            await bot.sendMessage(chatId, "File diterima. Membuat arsip dan menyamarkannya, mohon tunggu...");
+
+            const coverLink = await bot.getFileLink(state.coverFileId);
+            const embedLink = await bot.getFileLink(docFileId);
+            const embedFileName = msg.document.file_name;
+
+            const tempDir = path.join(__dirname, 'temp', chatId.toString());
+            if (!fs.existsSync(tempDir)) {
+                fs.mkdirSync(tempDir, { recursive: true });
+            }
+            const coverPath = path.join(tempDir, 'cover.jpg');
+            const embedPath = path.join(tempDir, embedFileName);
+            const zipPath = path.join(tempDir, 'archive.zip');
+            const outputPath = path.join(tempDir, `output_${embedFileName}.jpg`);
+
+            await downloadFile(coverLink, coverPath);
+            await downloadFile(embedLink, embedPath);
+
+            // 1. Zip the embed file
+            const zipCommand = `zip -j "${zipPath}" "${embedPath}"`;
+            exec(zipCommand, (zipError, zipStdout, zipStderr) => {
+                if (zipError) {
+                    console.error(`Zip Error: ${zipStderr}`);
+                    bot.sendMessage(chatId, 'Gagal membuat arsip zip.');
+                    fs.rmSync(tempDir, { recursive: true, force: true });
+                    delete userStates[chatId];
+                    return;
+                }
+
+                // 2. Concatenate the image and the zip file
+                const concatCommand = `cat "${coverPath}" "${zipPath}" > "${outputPath}"`;
+                exec(concatCommand, async (catError, catStdout, catStderr) => {
+                    if (catError) {
+                        console.error(`Concat Error: ${catStderr}`);
+                        bot.sendMessage(chatId, 'Gagal menyamarkan arsip sebagai gambar.');
+                        fs.rmSync(tempDir, { recursive: true, force: true });
+                        delete userStates[chatId];
+                        return;
+                    }
+
+                    await bot.sendDocument(chatId, outputPath, {}, {
+                        caption: "Berikut adalah arsip Anda yang disamarkan sebagai gambar. Rename menjadi .zip untuk mengekstrak."
+                    });
+
+                    fs.rmSync(tempDir, { recursive: true, force: true });
+                    delete userStates[chatId];
+                });
+            });
+
+        } catch (e) {
+            console.error("Gagal dalam proses zip:", e);
+            bot.sendMessage(chatId, "Terjadi kesalahan fatal. Silakan coba lagi.");
+            delete userStates[chatId];
+        }
+    }
 });
 
 bot.on("polling_error", (error) => {

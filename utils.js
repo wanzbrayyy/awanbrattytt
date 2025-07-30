@@ -22,9 +22,13 @@ function isAdmin(chatId) {
     return chatId.toString() === config.adminId;
 }
 
-async function sendStartMessage(bot, chatId, isAdminUser = false, isUserbot = false) {
+async function sendStartMessage(bot, chatId, isAdminUser = false, isUserbot = false, isPremiumUser = false) {
     let message = `\`\`\`${config.botDescription}\`\`\`\n\nSilakan pilih opsi:`;
-    let buttons = [
+    let buttons = [];
+
+    // Tombol standar
+    buttons.push(
+        { text: "🖼️ Send Images (Premium)", callback_data: "premium_menu" },
         { text: "🛍️ Produk", callback_data: "product" },
         { text: "👤 Daftar", callback_data: "register" },
         { text: "👤 Profil", callback_data: "profile" },
@@ -34,8 +38,8 @@ async function sendStartMessage(bot, chatId, isAdminUser = false, isUserbot = fa
         { text: "💌 Menfess", callback_data: "menfess" },
         { text: "💌 Confess", callback_data: "confess" },
         { text: "📝 Saran", callback_data: "saran" },
-        { text: "🚨 Laporan", callback_data: "laporan" },
-    ];
+        { text: "🚨 Laporan", callback_data: "laporan" }
+    );
 
     if (!isUserbot) {
         buttons.push({ text: "🤖 Claim Trial Userbot", callback_data: "claim_trial_userbot" });

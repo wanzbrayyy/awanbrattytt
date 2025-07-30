@@ -5,6 +5,7 @@ const path = require('path');
 const mongoose = require('mongoose');
 const config = require('./config');
 const bot = require('./telegram');
+const TrackedLink = require('./models/trackedLink');
 
 const app = express();
 const server = http.createServer(app);
@@ -27,6 +28,36 @@ app.get('/live-chat/:chatId', (req, res) => {
 
 app.get('/live-chat/admin/:chatId', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'admin-chat.html'));
+});
+
+app.get('/track/:linkId', async (req, res) => {
+    try {
+        const { linkId } = req.params;
+        const linkData = await TrackedLink.findOne({ linkId: linkId });
+
+        if (!linkData) {
+            return res.status(404).send('Tautan tidak ditemukan atau telah kedaluwarsa.');
+        }
+
+        // Kirim notifikasi ke pembuat tautan
+        const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+        const userAgent = req.headers['user-agent'];
+
+        const notificationMessage = `🔔 *Tautan Dilacak Terbuka!*\n\n` +
+                                  `🔗 **Tautan Asli:** ${linkData.originalLink}\n` +
+                                  `👤 **Dibuka oleh:**\n` +
+                                  `   - **IP:** \`${ip}\`\n` +
+                                  `   - **User Agent:** \`${userAgent}\``;
+
+        await bot.sendMessage(linkData.creatorChatId, notificationMessage, { parse_mode: 'Markdown' });
+
+        // Alihkan ke tautan asli
+        res.redirect(linkData.originalLink);
+
+    } catch (error) {
+        console.error("Kesalahan pada endpoint pelacakan:", error);
+        res.status(500).send('Terjadi kesalahan internal.');
+    }
 });
 
 io.on('connection', (socket) => {
