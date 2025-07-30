@@ -263,6 +263,46 @@ bot.on("callback_query", async (query) => {
     else if (data === "download_menu") showDownloadMenu(chatId);
     else if (data === "tiktok_v2") handleTikTokV2(chatId);
     else if (data === "twitter") handleTwitter(chatId);
+    else if (data.startsWith("reply_feedback_")) {
+      const targetUserId = data.split("_")[2];
+
+      // Pastikan hanya admin yang bisa menggunakan tombol ini
+      if (userId.toString() !== config.adminId) {
+          return bot.answerCallbackQuery(query.id, { text: 'Anda tidak diizinkan untuk melakukan tindakan ini.', show_alert: true });
+      }
+
+      bot.sendMessage(chatId, `✍️ Silakan ketik balasan Anda untuk pengguna dengan ID: ${targetUserId}`);
+
+      bot.once('message', async (replyMsg) => {
+          // Pastikan pesan balasan dari admin
+          if (replyMsg.from.id.toString() !== config.adminId) {
+              return;
+          }
+
+          const replyText = replyMsg.text;
+
+          const userMessage = `
+- - - - - - - - - - - - - -
+📬 **BALASAN DARI ADMIN** 📬
+- - - - - - - - - - - - - -
+Halo! Admin telah membalas feedback yang Anda kirimkan.
+
+💬 **Pesan Balasan:**
+${replyText}
+
+- - - - - - - - - - - - - -
+Terima kasih telah memberikan masukan!
+`;
+
+          try {
+              await bot.sendMessage(targetUserId, userMessage, { parse_mode: 'Markdown' });
+              bot.sendMessage(chatId, `✅ Balasan Anda telah berhasil dikirim ke pengguna ID: ${targetUserId}.`);
+          } catch (error) {
+              console.error(`Gagal mengirim balasan ke user ${targetUserId}:`, error);
+              bot.sendMessage(chatId, `❌ Gagal mengirim balasan. Mungkin pengguna telah memblokir bot.`);
+          }
+      });
+    }
     bot.answerCallbackQuery(query.id);
   } catch (error) {
     console.error("Gagal menangani callback query:", error.message);
