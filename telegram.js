@@ -401,7 +401,12 @@ bot.on("callback_query", async (query) => {
             return bot.answerCallbackQuery(query.id, { text: 'Perintah ini hanya untuk admin.', show_alert: true });
         }
 
-        const targetChatId = data.split("_")[2];
+        const targetChatIdStr = data.split("_")[2];
+        if (!targetChatIdStr || isNaN(parseInt(targetChatIdStr))) {
+            return bot.answerCallbackQuery(query.id, { text: 'Callback data tidak valid.', show_alert: true });
+        }
+        const targetChatId = parseInt(targetChatIdStr);
+
         try {
             const updatedUser = await User.findOneAndUpdate(
                 { chatId: targetChatId },
