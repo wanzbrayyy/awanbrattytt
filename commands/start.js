@@ -14,17 +14,22 @@ module.exports = {
         try {
             let user = await User.findOne({ chatId });
             if (!user) {
-                user = new User({ chatId: chatId, type: msg.chat.type, joinDate: moment().format() });
+                user = new User({ chatId: chatId, username: msg.from.username, type: msg.chat.type, joinDate: moment().format() });
                 await user.save();
+            } else {
+                // Jika pengguna sudah ada, periksa dan perbarui username jika perlu
+                if (msg.from.username && user.username !== msg.from.username) {
+                    user.username = msg.from.username;
+                    await user.save();
+                }
             }
 
             if (startPayload) {
                 const productId = startPayload;
-                // Since showProductDetail is in utils, it needs the bot object.
                 showProductDetail(bot, chatId, productId);
             } else {
-                // Same for sendStartMessage.
-                sendStartMessage(bot, chatId, isAdmin(userId));
+                // Teruskan status premium pengguna ke sendStartMessage
+                sendStartMessage(bot, chatId, isAdmin(userId), false, user.isPremium);
             }
         } catch (error) {
             console.error("Gagal menangani /start:", error.message);
