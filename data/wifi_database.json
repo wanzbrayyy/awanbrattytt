@@ -1,0 +1,44 @@
+{
+  "vulnerable_ssid_patterns": [
+    "TP-Link",
+    "ZTE",
+    "IndiHome",
+    "MyRepublic",
+    "Mikrotik",
+    "Huawei",
+    "@wifi.id",
+    "SpeedyInstan"
+  ],
+  "default_passwords_by_brand": {
+    "TP-Link": {
+      "common_passwords": ["admin", "password", "12345678"],
+      "login_info": "Biasanya diakses melalui 192.168.0.1 atau 192.168.1.1 dengan username/password: admin/admin."
+    },
+    "ZTE": {
+      "common_passwords": ["zte12345", "ztewifi", "admin", "user"],
+      "login_info": "Biasanya diakses melalui 192.168.1.1 dengan username/password: admin/admin atau user/user."
+    },
+    "IndiHome": {
+      "common_passwords": ["12345678", "user", "admin"],
+      "login_info": "Biasanya diakses melalui 192.168.1.1 atau 192.168.1.254 dengan username/password: admin/admin atau user/user."
+    },
+    "Huawei": {
+        "common_passwords": ["admin", "Huawei", "12345678"],
+        "login_info": "Biasanya diakses melalui 192.168.100.1 atau 192.168.3.1 dengan username/password: root/admin atau telecomadmin/admintelecom."
+    },
+    "MyRepublic": {
+        "common_passwords": [],
+        "login_info": "Password biasanya unik dan tertera di stiker router. Alamat IP umum adalah 192.168.1.1."
+    },
+    "Mikrotik": {
+        "common_passwords": [],
+        "login_info": "Tidak ada password default (kosong) saat pertama kali di-setup. Alamat IP umum adalah 192.168.88.1."
+    }
+  },
+  "specific_ssids": {
+    "TP-Link_ECAA": {
+        "brand": "TP-Link",
+        "notes": "Ini adalah SSID spesifik. Coba kata sandi umum untuk TP-Link."
+    }
+  }
+}
