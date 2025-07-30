@@ -31,6 +31,7 @@ for (const file of commandFiles) {
 const wishlists = {};
 const carts = {};
 const userbotSessions = {};
+const userStates = {};
 
 function saveData() {
     fs.writeFileSync("wishlists.json", JSON.stringify(wishlists));
