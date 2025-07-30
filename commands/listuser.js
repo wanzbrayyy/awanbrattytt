@@ -1,6 +1,12 @@
 const User = require('../models/user');
 const { isAdmin, createInlineKeyboard } = require('../utils');
 
+const escapeMarkdown = (text) => {
+    if (!text) return '';
+    // This is for MarkdownV2. Note the characters that need escaping.
+    return text.replace(/[_*[\]()~`>#+-=|{}.!]/g, '\\$&');
+};
+
 module.exports = {
     name: 'listuser',
     regex: /^\/listuser$/,
@@ -25,7 +31,13 @@ module.exports = {
 
             // 3. Kirim pesan untuk setiap pengguna dengan tombol inline
             for (const user of users) {
-                const username = user.username ? `@${user.username}` : 'Tidak ada';
+                // Lewati pengguna jika mereka tidak memiliki chatId untuk mencegah error
+                if (!user.chatId) {
+                    console.log(`Melewatkan pengguna karena chatId tidak valid: ${user._id}`);
+                    continue;
+                }
+
+                const username = escapeMarkdown(user.username ? `@${user.username}` : 'Tidak ada');
                 const premiumStatus = user.isPremium ? '✅ Premium' : '❌ Belum Premium';
 
                 let userText = `👤 *Info Pengguna*\n\n`;
