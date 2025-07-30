@@ -17,7 +17,7 @@ module.exports = {
 
             const feedbackText = feedbackMsg.text;
             const userId = feedbackMsg.from.id;
-            const username = feedbackMsg.from.username ? `@${feedbackMsg.from.username}` : 'Tidak diatur';
+            const username = feedbackMsg.from.username ? `@${feedbackMsg.from.username}` : (feedbackMsg.from.first_name || 'Pengguna');
 
             try {
                 const newFeedback = new Feedback({
@@ -29,17 +29,37 @@ module.exports = {
                 await newFeedback.save();
 
                 // Konfirmasi ke pengguna
-                bot.sendMessage(chatId, '✅ Terima kasih! Masukan Anda telah kami terima dan akan sangat membantu kami untuk berkembang.');
+                bot.sendMessage(chatId, '✅ **Terima kasih!**\\n\\nMasukan Anda telah kami terima dan akan sangat membantu kami untuk berkembang menjadi lebih baik lagi. ✨');
 
-                // Kirim notifikasi ke admin
+                // Kirim notifikasi ke admin dengan format baru dan tombol balas
                 const adminNotification = `
-📬 *Feedback Baru Diterima* 📬
+- - - - - - - - - - - - - -
+📮 **FEEDBACK BARU** 📮
+- - - - - - - - - - - - - -
+👤 **Dari:**
+   - **User:** ${username}
+   - **ID:** \`${userId}\`
 
-*Dari:* ${username} (ID: \`${userId}\`)
-*Pesan:*
+💬 **Pesan:**
 ${feedbackText}
-                `;
-                bot.sendMessage(config.adminId, adminNotification, { parse_mode: 'Markdown' });
+- - - - - - - - - - - - - -
+`;
+
+                const keyboard = {
+                    inline_keyboard: [
+                        [
+                            {
+                                text: '✍️ Balas Pesan Ini',
+                                callback_data: `reply_feedback_${userId}`
+                            }
+                        ]
+                    ]
+                };
+
+                bot.sendMessage(config.adminId, adminNotification, {
+                    parse_mode: 'Markdown',
+                    reply_markup: keyboard
+                });
 
             } catch (error) {
                 console.error("Gagal menyimpan feedback:", error);
