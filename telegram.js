@@ -12,12 +12,13 @@ const Userbot = require('./models/userbot');
 const { TDL } = require('@telepilotco/tdl');
 const moment = require("moment");
 const { createInlineKeyboard, isAdmin, sendStartMessage, showProductDetail } = require('./utils');
+const natural = require('natural');
 
 const bot = new TelegramBot(config.botToken, { polling: true });
 
 // Command Handler
 bot.commands = new Map();
-const commandFiles = fs.readdirSync('./commands').filter(file => file.endsWith('.js'));
+const commandFiles = fs.readdirSync('./commands').filter(file => file.endsWith('.js') && file !== 'feedback.js' && file !== 'awan.js');
 
 for (const file of commandFiles) {
     const command = require(`./commands/${file}`);
@@ -266,7 +267,6 @@ bot.on("callback_query", async (query) => {
     else if (data.startsWith("reply_feedback_")) {
       const targetUserId = data.split("_")[2];
 
-      // Pastikan hanya admin yang bisa menggunakan tombol ini
       if (userId.toString() !== config.adminId) {
           return bot.answerCallbackQuery(query.id, { text: 'Anda tidak diizinkan untuk melakukan tindakan ini.', show_alert: true });
       }
@@ -274,7 +274,6 @@ bot.on("callback_query", async (query) => {
       bot.sendMessage(chatId, `✍️ Silakan ketik balasan Anda untuk pengguna dengan ID: ${targetUserId}`);
 
       bot.once('message', async (replyMsg) => {
-          // Pastikan pesan balasan dari admin
           if (replyMsg.from.id.toString() !== config.adminId) {
               return;
           }
@@ -1410,5 +1409,108 @@ async function handleConfess(chatId) {
     }
   });
 }
+
+// Feedback Command
+bot.onText(/\/feedback/, (msg) => {
+    const chatId = msg.chat.id;
+
+    bot.sendMessage(chatId, '📝 Silakan ketik dan kirimkan masukan Anda untuk bot ini. Admin akan meninjaunya sesegera mungkin.');
+
+    bot.once('message', async (feedbackMsg) => {
+        if (feedbackMsg.chat.id !== chatId || (feedbackMsg.text && feedbackMsg.text.startsWith('/'))) {
+            return;
+        }
+
+        const feedbackText = feedbackMsg.text;
+        const userId = feedbackMsg.from.id;
+        const username = feedbackMsg.from.username ? `@${feedbackMsg.from.username}` : (feedbackMsg.from.first_name || 'Pengguna');
+
+        try {
+            const Feedback = require('./models/feedback'); // Moved require here
+            const newFeedback = new Feedback({
+                userId,
+                username,
+                feedbackText
+            });
+
+            await newFeedback.save();
+
+            bot.sendMessage(chatId, '✅ **Terima kasih!**\n\nMasukan Anda telah kami terima dan akan sangat membantu kami untuk berkembang menjadi lebih baik lagi. ✨');
+
+            const adminNotification = `
+- - - - - - - - - - - - - -
+📮 **FEEDBACK BARU** 📮
+- - - - - - - - - - - - - -
+👤 **Dari:**
+   - **User:** ${username}
+   - **ID:** \`${userId}\`
+
+💬 **Pesan:**
+${feedbackText}
+- - - - - - - - - - - - - -
+`;
+
+            const keyboard = {
+                inline_keyboard: [
+                    [
+                        {
+                            text: '✍️ Balas Pesan Ini',
+                            callback_data: `reply_feedback_${userId}`
+                        }
+                    ]
+                ]
+            };
+
+            bot.sendMessage(config.adminId, adminNotification, {
+                parse_mode: 'Markdown',
+                reply_markup: keyboard
+            });
+
+        } catch (error) {
+            console.error("Gagal menyimpan feedback:", error);
+            bot.sendMessage(chatId, 'Maaf, terjadi kesalahan saat menyimpan masukan Anda. Silakan coba lagi nanti.');
+        }
+    });
+});
+
+const classifier = new natural.BayesClassifier();
+
+// Train the classifier with some sample data
+classifier.addDocument('hallo', 'greeting');
+classifier.addDocument('hai', 'greeting');
+classifier.addDocument('selamat pagi', 'greeting');
+classifier.addDocument('hi', 'greeting');
+
+classifier.addDocument('kamu siapa', 'about_bot');
+classifier.addDocument('apa tujuanmu', 'about_bot');
+classifier.addDocument('apa yang bisa kamu lakukan', 'about_bot');
+
+classifier.addDocument('siapa yang membuatmu', 'about_creator');
+classifier.addDocument('siapa creatormu', 'about_creator');
+classifier.addDocument('siapa ownermu', 'about_creator');
+
+classifier.train();
+
+// Awan AI Assistant Command
+bot.onText(/\/awan (.+)/, (msg, match) => {
+    const chatId = msg.chat.id;
+    const query = match[1].toLowerCase();
+
+    const classification = classifier.classify(query);
+
+    let response = '';
+
+    if (classification === 'greeting') {
+        response = 'Halo! Ada yang bisa saya bantu?';
+    } else if (classification === 'about_bot') {
+        response = 'Saya adalah Asisten Awan, sebuah AI yang dirancang untuk membantu Anda.';
+    } else if (classification === 'about_creator') {
+        response = `Saya dibuat oleh ${config.ownerName}. Anda bisa menghubunginya di @${config.ownerUsername}.`;
+    } else {
+        response = 'Maaf, saya belum mengerti pertanyaan itu. Saya masih dalam tahap belajar.';
+    }
+
+    bot.sendMessage(chatId, `🤖 **Asisten Awan Menjawab:**\n\n${response}`, { parse_mode: 'Markdown' });
+});
 
 module.exports = bot;
