@@ -1621,26 +1621,56 @@ bot.on('document', async (msg) => {
                 return;
             }
 
-            // 4. Jalankan perintah steghide
-            const command = `steghide embed -cf "${coverPath}" -ef "${embedPath}" -sf "${outputPath}" -p "" -f`;
-            exec(command, async (error, stdout, stderr) => {
-                if (error) {
-                    console.error(`Steghide Error: ${stderr}`);
-                    bot.sendMessage(chatId, `Terjadi kesalahan saat memproses gambar dengan Steghide. Pastikan gambar sampul adalah JPG/BMP.`);
-                    // Cleanup
+            // 4. Periksa kapasitas embed
+            const infoCommand = `steghide info "${coverPath}"`;
+            exec(infoCommand, (infoError, infoStdout, infoStderr) => {
+                if (infoError) {
+                    console.error(`Steghide Info Error: ${infoStderr}`);
+                    bot.sendMessage(chatId, "Gagal mendapatkan informasi dari gambar sampul.");
                     fs.rmSync(tempDir, { recursive: true, force: true });
                     delete userStates[chatId];
                     return;
                 }
 
-                // 5. Kirim file hasil
-                await bot.sendDocument(chatId, outputPath, {}, {
-                    caption: "Berikut adalah gambar Anda yang telah diproses dengan Steghide."
-                });
+                const capacityMatch = infoStdout.match(/(\d+\.\d+)\sKB/);
+                if (!capacityMatch) {
+                    bot.sendMessage(chatId, "Tidak dapat menentukan kapasitas gambar sampul.");
+                    fs.rmSync(tempDir, { recursive: true, force: true });
+                    delete userStates[chatId];
+                    return;
+                }
 
-                // 6. Hapus file sementara dan reset state
-                fs.rmSync(tempDir, { recursive: true, force: true });
-                delete userStates[chatId];
+                const capacityInKb = parseFloat(capacityMatch[1]);
+                const embedFileSizeInKb = fs.statSync(embedPath).size / 1024;
+
+                if (embedFileSizeInKb > capacityInKb) {
+                    bot.sendMessage(chatId, `File yang akan disematkan terlalu besar untuk gambar sampul.\nKapasitas: ${capacityInKb.toFixed(2)} KB\nUkuran File: ${embedFileSizeInKb.toFixed(2)} KB`);
+                    fs.rmSync(tempDir, { recursive: true, force: true });
+                    delete userStates[chatId];
+                    return;
+                }
+
+                // 5. Jalankan perintah steghide
+                const command = `steghide embed -cf "${coverPath}" -ef "${embedPath}" -sf "${outputPath}" -p "" -f`;
+                exec(command, async (error, stdout, stderr) => {
+                    if (error) {
+                        console.error(`Steghide Error: ${stderr}`);
+                        bot.sendMessage(chatId, `Terjadi kesalahan saat memproses gambar dengan Steghide. Pastikan gambar sampul adalah JPG/BMP.`);
+                        // Cleanup
+                        fs.rmSync(tempDir, { recursive: true, force: true });
+                        delete userStates[chatId];
+                        return;
+                    }
+
+                    // 6. Kirim file hasil
+                    await bot.sendDocument(chatId, outputPath, {}, {
+                        caption: "Berikut adalah gambar Anda yang telah diproses dengan Steghide."
+                    });
+
+                    // 7. Hapus file sementara dan reset state
+                    fs.rmSync(tempDir, { recursive: true, force: true });
+                    delete userStates[chatId];
+                });
             });
 
         } catch (e) {
