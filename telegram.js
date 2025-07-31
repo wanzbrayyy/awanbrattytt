@@ -91,6 +91,11 @@ const welcomeMessages = {};
 
 const mutedUsers = {};
 
+const escapeMarkdown = (text) => {
+    if (!text) return '';
+    return text.replace(/[_*[\]()~`>#+-=|{}.!]/g, '\\$&');
+};
+
 let tdlibClient;
 let TDLIB_INITIALIZED = false;
 
@@ -130,8 +135,10 @@ bot.on("message", async (msg) => {
         }
         try {
             await bot.sendMessage(chatId, `⏳ Memulai sesi untuk ${phoneNumber}... Mohon tunggu.`);
+            console.log(`[TDLIB_DEBUG] Using apiId: ${config.apiId} (type: ${typeof config.apiId})`);
+            console.log(`[TDLIB_DEBUG] Using apiHash: ${config.apiHash} (type: ${typeof config.apiHash})`);
             const client = new TDL({
-                apiId: config.apiId,
+                apiId: parseInt(config.apiId, 10),
                 apiHash: config.apiHash,
                 databaseDirectory: `_td_database_${chatId}`,
                 filesDirectory: `_td_files_${chatId}`,
@@ -212,7 +219,54 @@ bot.on("message", async (msg) => {
         return;
     }
 
-    if (state && state.action && state.action.startsWith('awaiting_')) {
+    if (state && state.action && state.action.startsWith('awaiting_registration_')) {
+        if (state.action === 'awaiting_registration_email') {
+            if (!/^\S+@\S+\.\S+$/.test(text)) {
+                return bot.sendMessage(chatId, "Format email tidak valid. Silakan coba lagi.");
+            }
+            state.data.email = text.trim();
+            state.action = 'awaiting_registration_username';
+            await bot.sendMessage(chatId, "✅ Email diterima. Sekarang, masukkan username yang Anda inginkan:");
+        } else if (state.action === 'awaiting_registration_username') {
+            state.data.username = text.trim();
+            state.action = 'awaiting_registration_age';
+            await bot.sendMessage(chatId, "✅ Username diterima. Terakhir, berapa umur Anda?");
+        } else if (state.action === 'awaiting_registration_age') {
+            const age = parseInt(text, 10);
+            if (isNaN(age) || age <= 0) {
+                return bot.sendMessage(chatId, "Umur tidak valid. Harap masukkan angka yang benar.");
+            }
+            state.data.age = age;
+
+            try {
+                const newUser = new User({
+                    chatId: chatId,
+                    email: state.data.email,
+                    username: state.data.username,
+                    age: state.data.age,
+                    type: msg.chat.type,
+                    joinDate: moment().format(),
+                    daftar: true
+                });
+                await newUser.save();
+                await bot.sendMessage(chatId, `🎉 Pendaftaran berhasil! Selamat datang, ${state.data.username}!`);
+
+                // Hapus state setelah selesai
+                delete userStates[chatId];
+                // Tampilkan menu utama setelah daftar
+                sendStartMessage(bot, chatId, false, false, false);
+            } catch (error) {
+                if (error.code === 11000) { // Duplicate key error
+                    await bot.sendMessage(chatId, "Email atau username ini sudah terdaftar. Silakan mulai lagi dengan /start dan gunakan data yang berbeda.");
+                } else {
+                    console.error("Gagal menyimpan pengguna baru:", error);
+                    await bot.sendMessage(chatId, "Terjadi kesalahan saat menyimpan pendaftaran Anda. Mohon coba lagi.");
+                }
+                delete userStates[chatId];
+            }
+        }
+        return;
+    } else if (state && state.action && state.action.startsWith('awaiting_')) {
         const actionParts = state.action.split('_');
         const tool = actionParts[2];
 
@@ -438,37 +492,23 @@ ${ransomNote}
             const startPayload = args;
 
             try {
-                let user = await User.findOne({ chatId });
-                if (!user) {
-                    // Fix for duplicate key error + consolidation
-                    user = new User({
-                        chatId: chatId,
-                        username: msg.from.username,
-                        type: msg.chat.type,
-                        joinDate: moment().format(),
-                        email: `${chatId}@telegram.user` // Unique placeholder
-                    });
-                    await user.save();
-                } else {
-                    if (msg.from.username && user.username !== msg.from.username) {
-                        user.username = msg.from.username;
-                        await user.save();
-                    }
-                }
+                const user = await User.findOne({ chatId });
 
-                if (startPayload) {
-                    const productId = startPayload;
-                    showProductDetail(bot, chatId, productId);
+                // Jika pengguna tidak ada, mulai alur pendaftaran
+                if (!user) {
+                    userStates[chatId] = { action: 'awaiting_registration_email', data: {} };
+                    await bot.sendMessage(chatId, "👋 Selamat datang! Sepertinya Anda pengguna baru. Mari kita daftar.\n\nSilakan masukkan alamat email Anda:");
                 } else {
-                    sendStartMessage(bot, chatId, isAdmin(userId), false, user.isPremium);
+                    // Jika pengguna sudah ada
+                    if (startPayload) {
+                        showProductDetail(bot, chatId, startPayload);
+                    } else {
+                        sendStartMessage(bot, chatId, isAdmin(userId), false, user.isPremium);
+                    }
                 }
             } catch (error) {
                 console.error("Gagal menangani /start:", error);
-                if (error.code === 11000) {
-                    bot.sendMessage(chatId, "Terjadi kesalahan saat menyiapkan akun Anda. Silakan coba lagi nanti.");
-                } else {
-                    bot.sendMessage(chatId, "Terjadi kesalahan saat memproses perintah. Coba lagi nanti.");
-                }
+                bot.sendMessage(chatId, "Terjadi kesalahan saat memproses perintah.");
             }
             return; // End command processing
         }
@@ -508,6 +548,47 @@ ${ransomNote}
             } catch (error) {
                 console.error("Gagal menangani /start_simulation:", error);
                 bot.sendMessage(chatId, "Terjadi kesalahan saat memproses simulasi.");
+            }
+            return; // End command processing
+        }
+
+        if (command === 'listuser') {
+            const chatId = msg.chat.id;
+            const userId = msg.from.id;
+
+            if (!isAdmin(userId)) {
+                return bot.sendMessage(chatId, "Maaf, perintah ini hanya untuk Admin.");
+            }
+
+            try {
+                const users = await User.find({});
+                if (users.length === 0) {
+                    return bot.sendMessage(chatId, "Tidak ada pengguna yang terdaftar di database.");
+                }
+                bot.sendMessage(chatId, `Menyiapkan daftar ${users.length} pengguna...`);
+
+                for (const user of users) {
+                    if (!user.chatId) {
+                        console.log(`Melewatkan pengguna karena chatId tidak valid: ${user._id}`);
+                        continue;
+                    }
+                    const username = escapeMarkdown(user.username ? `@${user.username}` : 'Tidak ada');
+                    const premiumStatus = user.isPremium ? '✅ Premium' : '❌ Belum Premium';
+
+                    let userText = `👤 *Info Pengguna*\n\n`;
+                    userText += `**User ID:** \`${user._id}\`\n`;
+                    userText += `**Username:** ${username}\n`;
+                    userText += `**Chat ID:** \`${user.chatId}\`\n`;
+                    userText += `**Status:** ${premiumStatus}`;
+
+                    const keyboard = {
+                        inline_keyboard: [[{ text: "Jadikan Premium", callback_data: `add_premium_${user.chatId}` }]]
+                    };
+                    await bot.sendMessage(chatId, userText, { parse_mode: 'Markdown', reply_markup: keyboard });
+                }
+            } catch (error) {
+                console.error("Gagal menjalankan perintah /listuser:", error);
+                bot.sendMessage(chatId, "Terjadi kesalahan saat mengambil daftar pengguna.");
             }
             return; // End command processing
         }
