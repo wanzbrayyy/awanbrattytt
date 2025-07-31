@@ -4,6 +4,7 @@ const userSchema = new mongoose.Schema({
     chatId: { type: Number, required: true, unique: true },
     username: { type: String, required: false },
     email: { type: String },
+    age: { type: Number },
     saldo: { type: Number, default: 0 },
     daftar: { type: Boolean, default: false },
     isPremium: { type: Boolean, default: false },
@@ -14,7 +15,7 @@ const userSchema = new mongoose.Schema({
         longitude: { type: Number }
     },
     wishlist: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Product' }],
-    cart: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Product' }], // referensi carts
+    cart: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Product' }],
 });
 
 module.exports = mongoose.model('User', userSchema);
