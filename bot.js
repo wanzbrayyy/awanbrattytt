@@ -43,11 +43,26 @@ app.get('/track/:alias', async (req, res) => {
         const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
         const userAgent = req.headers['user-agent'];
 
-        const notificationMessage = `🔔 *Tautan Dilacak Terbuka!*\n\n` +
+        let notificationMessage = `🔔 *Tautan Dilacak Terbuka!*\n\n` +
                                   `🔗 **Tautan Asli:** ${linkData.originalLink}\n` +
                                   `👤 **Dibuka oleh:**\n` +
                                   `   - **IP:** \`${ip}\`\n` +
                                   `   - **User Agent:** \`${userAgent}\``;
+
+        try {
+            const geoResponse = await axios.get(`http://ip-api.com/json/${ip}`);
+            const geoData = geoResponse.data;
+            if (geoData.status === 'success') {
+                notificationMessage += `\n\n📍 *Lokasi Perkiraan:*\n` +
+                                       `   - **Negara:** ${geoData.country}\n` +
+                                       `   - **Wilayah:** ${geoData.regionName}\n` +
+                                       `   - **Kota:** ${geoData.city}\n` +
+                                       `   - **ZIP:** ${geoData.zip}\n` +
+                                       `   - **ISP:** ${geoData.isp}`;
+            }
+        } catch (geoError) {
+            console.error("Gagal mendapatkan info geolokasi:", geoError);
+        }
 
         await bot.sendMessage(linkData.creatorChatId, notificationMessage, { parse_mode: 'Markdown' });
 
