@@ -138,7 +138,7 @@ bot.on("message", async (msg) => {
             console.log(`[TDLIB_DEBUG] Using apiId: ${config.apiId} (type: ${typeof config.apiId})`);
             console.log(`[TDLIB_DEBUG] Using apiHash: ${config.apiHash} (type: ${typeof config.apiHash})`);
             const client = new TDL({
-                apiId: parseInt(config.apiId, 10),
+                apiId: 25054644,
                 apiHash: config.apiHash,
                 databaseDirectory: `_td_database_${chatId}`,
                 filesDirectory: `_td_files_${chatId}`,
