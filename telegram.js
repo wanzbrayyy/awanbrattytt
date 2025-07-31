@@ -115,8 +115,6 @@ bot.on("new_chat_members", (msg) => {
   }
 });
 
-const tdlibClients = {}; // Store TDLib client instances per user
-
 bot.on("message", async (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
@@ -1004,125 +1002,11 @@ async function sendOtp(phoneNumber) {
   }
 }
 
-const tdlibClients = {}; // Store TDLib client instances per user
-
 async function claimTrialUserbot(chatId) {
     // Start the state machine for userbot login
     userStates[chatId] = { action: 'userbot_awaiting_phone' };
     bot.sendMessage(chatId, "🤖 **Login Userbot**\n\nLangkah 1: Silakan masukkan nomor telepon Anda dengan format internasional (contoh: `+628123456789`).");
 }
-
-// Add new states to the main message handler
-bot.on("message", async (msg) => {
-    const chatId = msg.chat.id;
-    const text = msg.text;
-    const state = userStates[chatId];
-
-    if (state && state.action === 'userbot_awaiting_phone') {
-        const phoneNumber = text.trim();
-        // Basic validation
-        if (!phoneNumber.startsWith('+')) {
-            return bot.sendMessage(chatId, "Format nomor telepon tidak valid. Harap gunakan format internasional (contoh: `+628123456789`).");
-        }
-
-        try {
-            await bot.sendMessage(chatId, `⏳ Memulai sesi untuk ${phoneNumber}... Mohon tunggu.`);
-
-            const client = new TDL({
-                apiId: config.apiId,
-                apiHash: config.apiHash,
-                databaseDirectory: `_td_database_${chatId}`,
-                filesDirectory: `_td_files_${chatId}`,
-            });
-
-            client.on('update', async (update) => {
-                if (update['@type'] === 'updateAuthorizationState') {
-                    const authState = update.authorization_state;
-                    if (authState['@type'] === 'authorizationStateWaitTdlibParameters') {
-                        await client.send({ '@type': 'setTdlibParameters', parameters: {} });
-                    } else if (authState['@type'] === 'authorizationStateWaitEncryptionKey') {
-                        await client.send({ '@type': 'checkDatabaseEncryptionKey' });
-                    } else if (authState['@type'] === 'authorizationStateWaitCode') {
-                        userStates[chatId].action = 'userbot_awaiting_code';
-                        await bot.sendMessage(chatId, "Langkah 2: Masukkan kode OTP yang Anda terima di Telegram.");
-                    } else if (authState['@type'] === 'authorizationStateWaitPassword') {
-                        userStates[chatId].action = 'userbot_awaiting_password';
-                        await bot.sendMessage(chatId, "Langkah 3: Akun Anda dilindungi oleh Verifikasi Dua Langkah. Masukkan kata sandi Anda.");
-                    } else if (authState['@type'] === 'authorizationStateReady') {
-                        // Login successful
-                        tdlibClients[chatId] = client;
-                        delete userStates[chatId];
-
-                        let userbot = await Userbot.findOne({ userId: chatId });
-                        if (userbot) {
-                            return bot.sendMessage(chatId, "Anda sudah memiliki userbot aktif.");
-                        }
-
-                        userbot = new Userbot({
-                            userId: chatId,
-                            phoneNumber: phoneNumber,
-                            trialExpiry: moment().add(7, 'days').toDate(),
-                            isActive: true,
-                        });
-                        await userbot.save();
-                        await bot.sendMessage(chatId, "✅ Selamat! Userbot trial Anda berhasil diaktifkan selama 7 hari.");
-                        // Cleanly close the client after we are done
-                        await client.close();
-                    } else if (authState['@type'] === 'authorizationStateClosing' || authState['@type'] === 'authorizationStateClosed') {
-                         console.log(`TDLib client for ${chatId} is closing or closed.`);
-                         delete tdlibClients[chatId];
-                    }
-                }
-            });
-
-            client.on('error', (err) => {
-                console.error(`TDLib error for ${chatId}:`, err);
-                bot.sendMessage(chatId, `Terjadi kesalahan pada sesi TDLib. Silakan coba lagi. Error: ${err.message}`);
-                delete userStates[chatId];
-            });
-
-            await client.connect();
-            await client.send({ '@type': 'setAuthenticationPhoneNumber', phone_number: phoneNumber });
-
-            // Store the client instance to send code/password to it later
-            tdlibClients[chatId] = client;
-
-        } catch (error) {
-            console.error(`Gagal memulai TDLib client untuk ${chatId}:`, error);
-            bot.sendMessage(chatId, "Gagal memulai sesi userbot. Silakan coba lagi nanti.");
-            delete userStates[chatId];
-        }
-        return; // Stop further message processing
-    }
-
-    if (state && state.action === 'userbot_awaiting_code') {
-        const code = text.trim();
-        const client = tdlibClients[chatId];
-        if (client) {
-            await bot.sendMessage(chatId, "Verifikasi kode...");
-            await client.send({ '@type': 'checkAuthenticationCode', code: code });
-        } else {
-            bot.sendMessage(chatId, "Sesi login tidak ditemukan atau telah kedaluwarsa. Silakan mulai lagi dari /start.");
-            delete userStates[chatId];
-        }
-        return;
-    }
-
-    if (state && state.action === 'userbot_awaiting_password') {
-        const password = text.trim();
-        const client = tdlibClients[chatId];
-        if (client) {
-            await bot.sendMessage(chatId, "Verifikasi kata sandi...");
-            await client.send({ '@type': 'checkAuthenticationPassword', password: password });
-        } else {
-            bot.sendMessage(chatId, "Sesi login tidak ditemukan atau telah kedaluwarsa. Silakan mulai lagi dari /start.");
-            delete userStates[chatId];
-        }
-        return;
-    }
-
-    // ... existing message handlers
-});
 
 async function showAdminMenu(chatId) {
         if (!isAdmin(chatId)) {
@@ -2169,38 +2053,6 @@ bot.on("polling_error", (error) => {
 
 console.log(`${config.botName} berjalan...`);
 
-// Implmen Function of AUTH
-async function AUTHUSERCLIENT(phoneNumber, apiId, apiHash, getCode, getPassword) {
-  const client = await initializeTDLibClient(apiId, apiHash);
-
-  return new Promise((resolve, reject) => {
-    client.on('update', async (update) => {
-      if (update['@type'] === 'updateAuthorizationState') {
-        const state = update.authorization_state;
-        if (state['@type'] === 'authorizationStateWaitTdlibParameters') {
-          await client.send({ '@type': 'setTdlibParameters', parameters: {} });
-        } else if (state['@type'] === 'authorizationStateWaitEncryptionKey') {
-          await client.send({ '@type': 'checkDatabaseEncryptionKey' });
-        } else if (state['@type'] === 'authorizationStateWaitPhoneNumber') {
-          await client.send({ '@type': 'setAuthenticationPhoneNumber', phone_number: phoneNumber });
-        } else if (state['@type'] === 'authorizationStateWaitCode') {
-          const code = await getCode();
-          await client.send({ '@type': 'checkAuthenticationCode', code: code });
-        } else if (state['@type'] === 'authorizationStateWaitPassword') {
-          const password = await getPassword();
-          await client.send({ '@type': 'checkAuthenticationPassword', password: password });
-        } else if (state['@type'] === 'authorizationStateReady') {
-          const session = await client.invoke({ '@type': 'getStorage', key: 'session' });
-          resolve({ client, session: session.value });
-        } else if (state['@type'] === 'authorizationStateClosing') {
-          reject(new Error('Authorization closing'));
-        } else if (state['@type'] === 'authorizationStateClosed') {
-          reject(new Error('Authorization closed'));
-        }
-      }
-    });
-  });
-}
 
 async function handleMenfess(chatId) {
   bot.sendMessage(chatId, "Kirimkan pesan confess dengan format:\n\n`pesan|from|chat_id`\n\nUntuk mendapatkan chat_id, gunakan perintah /id <username>", { parse_mode: "Markdown" });
