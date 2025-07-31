@@ -19,6 +19,7 @@ const Jimp = require('jimp');
 const { createInlineKeyboard, isAdmin, sendStartMessage, showProductDetail } = require('./utils');
 const DoxwareSimulation = require('./models/doxwareSimulation');
 const natural = require('natural');
+const { sendAkun } = require('./unchek');
 
 const bot = new TelegramBot(config.botToken, { polling: true });
 
@@ -484,7 +485,7 @@ ${ransomNote}
                 return bot.sendMessage(chatId, "Jumlah tidak valid. Harap masukkan angka yang benar.");
             }
 
-            bot.sendMessage(chatId, `Anda meminta ${quantity} ${item}.`);
+            sendAkun(bot, chatId, item, quantity);
             delete userStates[chatId];
             return;
         }
