@@ -190,7 +190,7 @@ bot.on("message", async (msg) => {
 
                     await coverImage.writeAsync(outputPath);
 
-                    await bot.sendDocument(chatId, outputPath, {}, {
+                    await bot.sendPhoto(chatId, outputPath, {
                         caption: "Berikut adalah gambar Anda yang telah disisipi QR code pelacakan."
                     });
 
