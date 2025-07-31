@@ -137,12 +137,15 @@ bot.on("message", async (msg) => {
             await bot.sendMessage(chatId, `⏳ Memulai sesi untuk ${phoneNumber}... Mohon tunggu.`);
             console.log(`[TDLIB_DEBUG] Using apiId: ${config.apiId} (type: ${typeof config.apiId})`);
             console.log(`[TDLIB_DEBUG] Using apiHash: ${config.apiHash} (type: ${typeof config.apiHash})`);
-            const client = new TDL({
-                apiId: 25054644,
+
+            const clientOptions = {
+                apiId: parseInt(config.apiId, 10),
                 apiHash: config.apiHash,
                 databaseDirectory: `_td_database_${chatId}`,
                 filesDirectory: `_td_files_${chatId}`,
-            });
+            };
+
+            const client = new TDL(clientOptions);
 
             client.on('update', async (update) => {
                 if (update['@type'] === 'updateAuthorizationState') {
