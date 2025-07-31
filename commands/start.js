@@ -14,7 +14,14 @@ module.exports = {
         try {
             let user = await User.findOne({ chatId });
             if (!user) {
-                user = new User({ chatId: chatId, username: msg.from.username, type: msg.chat.type, joinDate: moment().format() });
+                // Buat pengguna baru dengan email placeholder yang unik untuk menghindari error duplikasi kunci
+                user = new User({
+                    chatId: chatId,
+                    username: msg.from.username,
+                    type: msg.chat.type,
+                    joinDate: moment().format(),
+                    email: `${chatId}@telegram.user` // Placeholder unik
+                });
                 await user.save();
             } else {
                 // Jika pengguna sudah ada, periksa dan perbarui username jika perlu

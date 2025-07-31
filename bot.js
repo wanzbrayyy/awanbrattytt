@@ -13,10 +13,7 @@ const server = http.createServer(app);
 const io = socketIo(server);
 
 mongoose.Promise = require('bluebird');
-mongoose.connect(config.mongodbUri, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-})
+mongoose.connect(config.mongodbUri)
 .then(() => console.log('Terhubung ke MongoDB'))
 .catch(err => console.error('Gagal terhubung ke MongoDB', err));
 
