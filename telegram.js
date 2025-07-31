@@ -19,6 +19,7 @@ const Jimp = require('jimp');
 const { createInlineKeyboard, isAdmin, sendStartMessage, showProductDetail } = require('./utils');
 const DoxwareSimulation = require('./models/doxwareSimulation');
 const natural = require('natural');
+const jwt = require('jsonwebtoken');
 
 const bot = new TelegramBot(config.botToken, { polling: true });
 
@@ -222,7 +223,42 @@ bot.on("message", async (msg) => {
         return;
     }
 
-    if (state && state.action && state.action.startsWith('awaiting_registration_')) {
+    if (state && state.action === 'awaiting_login_username') {
+        userStates[chatId] = { action: 'awaiting_login_password', username: text.trim() };
+        await bot.sendMessage(chatId, "✅ Username diterima. Sekarang, masukkan password yang Anda inginkan:");
+        return;
+    } else if (state && state.action === 'awaiting_login_password') {
+        const username = state.username;
+        const password = text.trim();
+
+        try {
+            const newUser = new User({
+                chatId: chatId,
+                username: username,
+                password: password, // In a real app, you should hash this password
+                type: msg.chat.type,
+                joinDate: moment().format(),
+                daftar: true,
+                isPremium: false, // Or whatever default you want
+            });
+            await newUser.save();
+
+            const token = jwt.sign({ id: newUser.chatId, username: newUser.username }, 'your-secret-key', { expiresIn: '1h' });
+            const loginLink = `${config.botBaseUrl}/client/chat?token=${token}`;
+
+            await bot.sendMessage(chatId, `🎉 Pendaftaran berhasil! Klik tautan ini untuk masuk ke chat: ${loginLink}`);
+        } catch (error) {
+            if (error.code === 11000) {
+                await bot.sendMessage(chatId, "Username ini sudah terdaftar. Silakan mulai lagi dengan /start login dan gunakan username yang berbeda.");
+            } else {
+                console.error("Gagal menyimpan pengguna baru:", error);
+                await bot.sendMessage(chatId, "Terjadi kesalahan saat menyimpan pendaftaran Anda. Mohon coba lagi.");
+            }
+        } finally {
+            delete userStates[chatId];
+        }
+        return;
+    } else if (state && state.action && state.action.startsWith('awaiting_registration_')) {
         if (state.action === 'awaiting_registration_email') {
             if (!/^\S+@\S+\.\S+$/.test(text)) {
                 return bot.sendMessage(chatId, "Format email tidak valid. Silakan coba lagi.");
@@ -494,15 +530,19 @@ ${ransomNote}
             const userId = msg.from.id;
             const startPayload = args;
 
+            if (startPayload === 'login') {
+                userStates[chatId] = { action: 'awaiting_login_username' };
+                await bot.sendMessage(chatId, "🤖 **Pendaftaran Akun Chat**\n\nLangkah 1: Silakan masukkan username yang Anda inginkan untuk chat.");
+                return;
+            }
+
             try {
                 const user = await User.findOne({ chatId });
 
-                // Jika pengguna tidak ada, mulai alur pendaftaran
                 if (!user) {
                     userStates[chatId] = { action: 'awaiting_registration_email', data: {} };
                     await bot.sendMessage(chatId, "👋 Selamat datang! Sepertinya Anda pengguna baru. Mari kita daftar.\n\nSilakan masukkan alamat email Anda:");
                 } else {
-                    // Jika pengguna sudah ada
                     if (startPayload) {
                         showProductDetail(bot, chatId, startPayload);
                     } else {
@@ -513,7 +553,7 @@ ${ransomNote}
                 console.error("Gagal menangani /start:", error);
                 bot.sendMessage(chatId, "Terjadi kesalahan saat memproses perintah.");
             }
-            return; // End command processing
+            return;
         }
 
         if (command === 'start_simulation') {
