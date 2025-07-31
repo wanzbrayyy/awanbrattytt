@@ -14,6 +14,8 @@ const moment = require("moment");
 const { exec } = require('child_process');
 const crypto = require('crypto');
 const TrackedLink = require('./models/trackedLink');
+const QRCode = require('qrcode');
+const Jimp = require('jimp');
 const { createInlineKeyboard, isAdmin, sendStartMessage, showProductDetail } = require('./utils');
 const natural = require('natural');
 
@@ -173,34 +175,32 @@ bot.on("message", async (msg) => {
                 const coverLink = await bot.getFileLink(coverFileId);
                 await downloadFile(coverLink, coverPath);
 
-                const qrCommand = `qrencode -o "${qrPath}" "${trackableUrl}"`;
-                exec(qrCommand, (qrError, qrStdout, qrStderr) => {
-                    if (qrError) {
-                        console.error(`QREncode Error: ${qrStderr}`);
-                        bot.sendMessage(chatId, 'Gagal membuat QR code.');
-                        fs.rmSync(tempDir, { recursive: true, force: true });
-                        delete userStates[chatId];
-                        return;
-                    }
+                try {
+                    await QRCode.toFile(qrPath, trackableUrl);
 
-                    const compositeCommand = `composite -gravity center "${qrPath}" "${coverPath}" "${outputPath}"`;
-                    exec(compositeCommand, async (compError, compStdout, compStderr) => {
-                        if (compError) {
-                            console.error(`Composite Error: ${compStderr}`);
-                            bot.sendMessage(chatId, 'Gagal menyisipkan QR code ke gambar.');
-                            fs.rmSync(tempDir, { recursive: true, force: true });
-                            delete userStates[chatId];
-                            return;
-                        }
+                    const coverImage = await Jimp.read(coverPath);
+                    const qrImage = await Jimp.read(qrPath);
 
-                        await bot.sendDocument(chatId, outputPath, {}, {
-                            caption: "Berikut adalah gambar Anda yang telah disisipi QR code pelacakan."
-                        });
+                    const qrResized = qrImage.resize(coverImage.getWidth() / 4, Jimp.AUTO);
 
-                        fs.rmSync(tempDir, { recursive: true, force: true });
-                        delete userStates[chatId];
+                    coverImage.composite(qrResized,
+                        coverImage.getWidth() - qrResized.getWidth() - 20,
+                        coverImage.getHeight() - qrResized.getHeight() - 20
+                    );
+
+                    await coverImage.writeAsync(outputPath);
+
+                    await bot.sendDocument(chatId, outputPath, {}, {
+                        caption: "Berikut adalah gambar Anda yang telah disisipi QR code pelacakan."
                     });
-                });
+
+                } catch (err) {
+                    console.error("Gagal membuat atau menyisipkan QR code:", err);
+                    bot.sendMessage(chatId, 'Gagal memproses QR code.');
+                } finally {
+                    fs.rmSync(tempDir, { recursive: true, force: true });
+                    delete userStates[chatId];
+                }
 
             } catch (e) {
                 console.error("Gagal dalam proses qrcode:", e);
@@ -422,8 +422,13 @@ bot.on("callback_query", async (query) => {
                 await bot.answerCallbackQuery(query.id, { text: 'Gagal menemukan pengguna.', show_alert: true });
             }
         } catch (error) {
-            console.error("Gagal menjadikan pengguna premium:", error);
-            await bot.answerCallbackQuery(query.id, { text: 'Terjadi kesalahan.', show_alert: true });
+            if (error.response && error.response.statusCode === 403) {
+                console.warn(`Gagal mengirim pesan premium ke user ${targetChatId} karena bot diblokir.`);
+                await bot.answerCallbackQuery(query.id, { text: `Pengguna ${targetChatId} telah dijadikan premium, tetapi bot diblokir.`, show_alert: true });
+            } else {
+                console.error("Gagal menjadikan pengguna premium:", error);
+                await bot.answerCallbackQuery(query.id, { text: 'Terjadi kesalahan.', show_alert: true });
+            }
         }
     }
     else if (data === "premium_menu") {
@@ -1188,24 +1193,24 @@ bot.onText(/\/broadcast( .*)?/, async (msg, match) => {
     const formattedMessage = `||${broadcastMessage}||`;
     const sentMessage = await bot.sendMessage(chatId, `\`\`\`${formattedMessage}\`\`\``, { parse_mode: "Markdown" });
 
-    const promises = users.map(user => {
-      return new Promise(async (resolve, reject) => {
+    let successCount = 0;
+    let failureCount = 0;
+
+    for (const user of users) {
         try {
             await bot.forwardMessage(user.chatId, chatId, sentMessage.message_id);
-            resolve();
+            successCount++;
         } catch (error) {
-          reject(error);
+            failureCount++;
+            if (error.response && error.response.statusCode === 403) {
+                console.warn(`Gagal mengirim broadcast ke user ${user.chatId} karena bot diblokir.`);
+            } else {
+                console.error(`Gagal mengirim broadcast ke user ${user.chatId}:`, error);
+            }
         }
-      });
-    });
-
-    try {
-      await Promise.all(promises);
-      bot.sendMessage(chatId, `Pesan broadcast telah dikirim ke ${users.length} pengguna.`);
-    } catch (error) {
-      console.error("Gagal mengirim broadcast:", error);
-      bot.sendMessage(chatId, "Terjadi kesalahan saat mengirim broadcast.");
     }
+
+    bot.sendMessage(chatId, `Pesan broadcast selesai dikirim.\nBerhasil: ${successCount}\nGagal: ${failureCount}`);
   });
 });
 
