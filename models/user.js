@@ -4,6 +4,7 @@ const userSchema = new mongoose.Schema({
     chatId: { type: Number, required: true, unique: true },
     username: { type: String, required: false },
     email: { type: String },
+    age: { type: Number },
     saldo: { type: Number, default: 0 },
     daftar: { type: Boolean, default: false },
     isPremium: { type: Boolean, default: false },
