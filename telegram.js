@@ -16,7 +16,7 @@ const crypto = require('crypto');
 const TrackedLink = require('./models/trackedLink');
 const QRCode = require('qrcode');
 const Jimp = require('jimp');
-const { createInlineKeyboard, isAdmin, sendStartMessage, showProductDetail } = require('./utils');
+const { createInlineKeyboard, isAdmin, sendStartMessage, showProductDetail, sendAwanStartMessage } = require('./utils');
 const DoxwareSimulation = require('./models/doxwareSimulation');
 const natural = require('natural');
 const { sendAkun } = require('./unchek');
@@ -514,7 +514,13 @@ ${ransomNote}
                     await bot.sendMessage(chatId, "👋 Selamat datang! Sepertinya Anda pengguna baru. Mari kita daftar.\n\nSilakan masukkan alamat email Anda:");
                 } else {
                     // Jika pengguna sudah ada
-                    if (startPayload) {
+                    if (startPayload === 'awan') {
+                        if (user.isPremium) {
+                            sendAwanStartMessage(bot, chatId);
+                        } else {
+                            bot.sendMessage(chatId, "Fitur 'awan' hanya untuk pengguna premium.");
+                        }
+                    } else if (startPayload) {
                         showProductDetail(bot, chatId, startPayload);
                     } else {
                         sendStartMessage(bot, chatId, isAdmin(userId), false, user.isPremium);

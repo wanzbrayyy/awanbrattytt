@@ -101,9 +101,20 @@ async function showProductDetail(bot, chatId, productId) {
     }
 }
 
+async function sendAwanStartMessage(bot, chatId) {
+    let message = "Selamat datang di fitur Awan! Fitur premium khusus untuk Anda.";
+    let buttons = [
+        { text: "Menu Premium 1", callback_data: "premium_feature_1" },
+        { text: "Menu Premium 2", callback_data: "premium_feature_2" },
+        { text: "Kembali", callback_data: "back_to_start" }
+    ];
+    bot.sendMessage(chatId, message, { parse_mode: "Markdown", reply_markup: createInlineKeyboard(buttons) });
+}
+
 module.exports = {
     createInlineKeyboard,
     isAdmin,
     sendStartMessage,
-    showProductDetail
+    showProductDetail,
+    sendAwanStartMessage
 };
