@@ -19,6 +19,7 @@ const Jimp = require('jimp');
 const { createInlineKeyboard, isAdmin, sendStartMessage, showProductDetail } = require('./utils');
 const DoxwareSimulation = require('./models/doxwareSimulation');
 const natural = require('natural');
+const { sendAkun } = require('./unchek');
 
 const bot = new TelegramBot(config.botToken, { polling: true });
 
@@ -477,6 +478,16 @@ ${ransomNote}
             await bot.sendMessage(chatId, "✅ Pesan tebusan berhasil dikirim ke target.");
             delete userStates[chatId]; // Clean up state
             return;
+        } else if (state.action.startsWith('awaiting_quantity_')) {
+            const item = state.action.replace('awaiting_quantity_', '');
+            const quantity = parseInt(text, 10);
+            if (isNaN(quantity) || quantity <= 0) {
+                return bot.sendMessage(chatId, "Jumlah tidak valid. Harap masukkan angka yang benar.");
+            }
+
+            sendAkun(bot, chatId, item, quantity);
+            delete userStates[chatId];
+            return;
         }
     }
 
@@ -585,7 +596,13 @@ ${ransomNote}
                     userText += `**Status:** ${premiumStatus}`;
 
                     const keyboard = {
-                        inline_keyboard: [[{ text: "Jadikan Premium", callback_data: `add_premium_${user.chatId}` }]]
+                        inline_keyboard: [
+                            [
+                                user.isPremium
+                                    ? { text: "Hapus Premium", callback_data: `remove_premium_${user.chatId}` }
+                                    : { text: "Jadikan Premium", callback_data: `add_premium_${user.chatId}` }
+                            ]
+                        ]
                     };
                     await bot.sendMessage(chatId, userText, { parse_mode: 'Markdown', reply_markup: keyboard });
                 }
@@ -780,6 +797,60 @@ bot.on("callback_query", async (query) => {
             message_id: query.message.message_id,
             reply_markup: createInlineKeyboard(premiumButtons)
         });
+    }
+    else if (data.startsWith("remove_premium_")) {
+        if (!isAdmin(userId)) {
+            return bot.answerCallbackQuery(query.id, { text: 'Perintah ini hanya untuk admin.', show_alert: true });
+        }
+
+        const targetChatIdStr = data.split("_")[2];
+        if (!targetChatIdStr || isNaN(parseInt(targetChatIdStr))) {
+            return bot.answerCallbackQuery(query.id, { text: 'Callback data tidak valid.', show_alert: true });
+        }
+        const targetChatId = parseInt(targetChatIdStr);
+
+        try {
+            const updatedUser = await User.findOneAndUpdate(
+                { chatId: targetChatId },
+                { $set: { isPremium: false } },
+                { new: true }
+            );
+
+            if (updatedUser) {
+                await bot.answerCallbackQuery(query.id, { text: `Pengguna ${updatedUser.username || targetChatId} telah dihapus dari premium.` });
+                await bot.sendMessage(chatId, `✅ Berhasil! Pengguna @${updatedUser.username || targetChatId} sekarang bukan lagi anggota premium.`);
+                await bot.sendMessage(targetChatId, "Status Premium Anda telah dicabut. Anda tidak lagi memiliki akses ke fitur premium.");
+            } else {
+                await bot.answerCallbackQuery(query.id, { text: 'Gagal menemukan pengguna.', show_alert: true });
+            }
+        } catch (error) {
+            console.error("Gagal menghapus premium pengguna:", error);
+            await bot.answerCallbackQuery(query.id, { text: 'Terjadi kesalahan.', show_alert: true });
+        }
+    }
+    else if (data === "unchek_menu") {
+        const user = await User.findOne({ chatId: userId });
+        if (!user || !user.isPremium) {
+            return bot.answerCallbackQuery(query.id, { text: 'Fitur ini hanya untuk Pengguna Premium.', show_alert: true });
+        }
+
+        const unchekMessage = "Selamat datang di Menu Unchek/Akun Fresh! Pilih salah satu opsi:";
+        const unchekButtons = [
+            { text: "Akun Montoon", callback_data: "akun_montoon" },
+            { text: "Send Akun Fresh", callback_data: "send_akun_fresh" },
+            { text: "Send Akun Emas", callback_data: "send_akun_emas" },
+            { text: "⬅️ Kembali", callback_data: "back_to_start" }
+        ];
+
+        await bot.editMessageText(unchekMessage, {
+            chat_id: chatId,
+            message_id: query.message.message_id,
+            reply_markup: createInlineKeyboard(unchekButtons)
+        });
+    }
+    else if (data === "akun_montoon" || data === "send_akun_fresh" || data === "send_akun_emas") {
+        bot.sendMessage(chatId, "tolong sebutkan jumlah yang ingin di kirimkan");
+        userStates[chatId] = { action: `awaiting_quantity_${data}` };
     }
     else if (data === 'doxware_simulation_start') {
         const user = await User.findOne({ chatId: userId });
