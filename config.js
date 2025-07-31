@@ -5,7 +5,7 @@ module.exports = {
   ownerName: "wanzofc",
   ownerUsername: "maverick_dark",
   botUsername: "wanzofc_shop_bot",
-  botDescription: "halo selamat datang di Wanz Store! Silakan lihat-lihat produk kami.",
+  botDescription: "wanzofc shop bot",
   groupLink: "https://t.me/wanzstore",
   qrisImagePath: "images/qris.jpg",
   midtransServerKey: "Mid-server-zvgGUiY7SS-HS_qhWLkqZQuL",

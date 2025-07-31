@@ -44,6 +44,9 @@ async function sendStartMessage(bot, chatId, isAdminUser = false, isUserbot = fa
     if (!isUserbot) {
         buttons.push({ text: "🤖 Claim Trial Userbot", callback_data: "claim_trial_userbot" });
     }
+    if (isPremiumUser) {
+        buttons.push({ text: "Akses Unchek/Akun Fresh", callback_data: "unchek_menu" });
+    }
     if (isAdminUser) {
         buttons.push({ text: "👑 Admin Menu", callback_data: "admin_menu" });
     }
