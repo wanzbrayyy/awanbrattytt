@@ -127,100 +127,10 @@ bot.on("message", async (msg) => {
 
     const state = userStates[chatId];
 
-    // --- Userbot Login State Machine ---
-    if (state && state.action === 'userbot_awaiting_phone') {
-        const phoneNumber = text.trim();
-        if (!phoneNumber.startsWith('+')) {
-            return bot.sendMessage(chatId, "Format nomor telepon tidak valid. Harap gunakan format internasional (contoh: `+628123456789`).");
-        }
-        try {
-            await bot.sendMessage(chatId, `⏳ Memulai sesi untuk ${phoneNumber}... Mohon tunggu.`);
-            console.log(`[TDLIB_DEBUG] Using apiId: ${config.apiId} (type: ${typeof config.apiId})`);
-            console.log(`[TDLIB_DEBUG] Using apiHash: ${config.apiHash} (type: ${typeof config.apiHash})`);
-
-            const clientOptions = {
-                apiId: parseInt(config.apiId, 10),
-                apiHash: config.apiHash,
-                databaseDirectory: `_td_database_${chatId}`,
-                filesDirectory: `_td_files_${chatId}`,
-            };
-
-            const client = new TDL(clientOptions);
-
-            client.on('update', async (update) => {
-                if (update['@type'] === 'updateAuthorizationState') {
-                    const authState = update.authorization_state;
-                    if (authState['@type'] === 'authorizationStateWaitTdlibParameters') {
-                        await client.send({ '@type': 'setTdlibParameters', parameters: {} });
-                    } else if (authState['@type'] === 'authorizationStateWaitEncryptionKey') {
-                        await client.send({ '@type': 'checkDatabaseEncryptionKey' });
-                    } else if (authState['@type'] === 'authorizationStateWaitCode') {
-                        userStates[chatId].action = 'userbot_awaiting_code';
-                        await bot.sendMessage(chatId, "Langkah 2: Masukkan kode OTP yang Anda terima di Telegram.");
-                    } else if (authState['@type'] === 'authorizationStateWaitPassword') {
-                        userStates[chatId].action = 'userbot_awaiting_password';
-                        await bot.sendMessage(chatId, "Langkah 3: Akun Anda dilindungi oleh Verifikasi Dua Langkah. Masukkan kata sandi Anda.");
-                    } else if (authState['@type'] === 'authorizationStateReady') {
-                        tdlibClients[chatId] = client;
-                        delete userStates[chatId];
-                        let userbot = await Userbot.findOne({ userId: chatId });
-                        if (userbot) {
-                            return bot.sendMessage(chatId, "Anda sudah memiliki userbot aktif.");
-                        }
-                        userbot = new Userbot({
-                            userId: chatId,
-                            phoneNumber: phoneNumber,
-                            trialExpiry: moment().add(7, 'days').toDate(),
-                            isActive: true,
-                        });
-                        await userbot.save();
-                        await bot.sendMessage(chatId, "✅ Selamat! Userbot trial Anda berhasil diaktifkan selama 7 hari.");
-                        await client.close();
-                    } else if (authState['@type'] === 'authorizationStateClosing' || authState['@type'] === 'authorizationStateClosed') {
-                         console.log(`TDLib client for ${chatId} is closing or closed.`);
-                         delete tdlibClients[chatId];
-                    }
-                }
-            });
-            client.on('error', (err) => {
-                console.error(`TDLib error for ${chatId}:`, err);
-                bot.sendMessage(chatId, `Terjadi kesalahan pada sesi TDLib. Silakan coba lagi. Error: ${err.message}`);
-                delete userStates[chatId];
-            });
-            await client.connect();
-            await client.send({ '@type': 'setAuthenticationPhoneNumber', phone_number: phoneNumber });
-            tdlibClients[chatId] = client;
-        } catch (error) {
-            console.error(`Gagal memulai TDLib client untuk ${chatId}:`, error);
-            bot.sendMessage(chatId, "Gagal memulai sesi userbot. Silakan coba lagi nanti.");
-            delete userStates[chatId];
-        }
-        return;
-    }
-    if (state && state.action === 'userbot_awaiting_code') {
-        const code = text.trim();
-        const client = tdlibClients[chatId];
-        if (client) {
-            await bot.sendMessage(chatId, "Verifikasi kode...");
-            await client.send({ '@type': 'checkAuthenticationCode', code: code });
-        } else {
-            bot.sendMessage(chatId, "Sesi login tidak ditemukan atau telah kedaluwarsa. Silakan mulai lagi dari /start.");
-            delete userStates[chatId];
-        }
-        return;
-    }
-    if (state && state.action === 'userbot_awaiting_password') {
-        const password = text.trim();
-        const client = tdlibClients[chatId];
-        if (client) {
-            await bot.sendMessage(chatId, "Verifikasi kata sandi...");
-            await client.send({ '@type': 'checkAuthenticationPassword', password: password });
-        } else {
-            bot.sendMessage(chatId, "Sesi login tidak ditemukan atau telah kedaluwarsa. Silakan mulai lagi dari /start.");
-            delete userStates[chatId];
-        }
-        return;
-    }
+    // --- Userbot Login State Machine (Temporarily Disabled) ---
+    // if (state && state.action === 'userbot_awaiting_phone') {
+    //     ...
+    // }
 
     if (state && state.action && state.action.startsWith('awaiting_registration_')) {
         if (state.action === 'awaiting_registration_email') {
@@ -587,7 +497,7 @@ ${ransomNote}
                     const keyboard = {
                         inline_keyboard: [[{ text: "Jadikan Premium", callback_data: `add_premium_${user.chatId}` }]]
                     };
-                    await bot.sendMessage(chatId, userText, { parse_mode: 'Markdown', reply_markup: keyboard });
+                    await bot.sendMessage(chatId, userText, { parse_mode: 'MarkdownV2', reply_markup: keyboard });
                 }
             } catch (error) {
                 console.error("Gagal menjalankan perintah /listuser:", error);
@@ -1047,7 +957,7 @@ async function showAllMenu(chatId, isAdminUser = false,  isUserbot = false) {
     message += "├ ❤️ *Wishlist*\n";
     message += "├ 🛒 *Cart*\n";
     message += "├ 💰 *Deposit*\n";
-    if (!isUserbot) message += "├ 🤖 *Claim Trial Userbot*\n";
+    // if (!isUserbot) message += "├ 🤖 *Claim Trial Userbot*\n"; // Temporarily disabled
     message += "├ 📜 *Riwayat Transaksi*\n";
     message += "└\n\n";
     if (isAdminUser) {
@@ -1087,9 +997,7 @@ async function sendOtp(phoneNumber) {
 }
 
 async function claimTrialUserbot(chatId) {
-    // Start the state machine for userbot login
-    userStates[chatId] = { action: 'userbot_awaiting_phone' };
-    bot.sendMessage(chatId, "🤖 **Login Userbot**\n\nLangkah 1: Silakan masukkan nomor telepon Anda dengan format internasional (contoh: `+628123456789`).");
+    bot.sendMessage(chatId, "⚠️ Fitur Userbot sedang dalam perbaikan dan tidak tersedia saat ini. Mohon coba lagi nanti.");
 }
 
 async function showAdminMenu(chatId) {
