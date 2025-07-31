@@ -1622,7 +1622,7 @@ bot.on('document', async (msg) => {
             }
 
             // 4. Periksa kapasitas embed
-            const infoCommand = `steghide info "${coverPath}"`;
+            const infoCommand = `steghide info "${coverPath}" -p ""`;
             exec(infoCommand, (infoError, infoStdout, infoStderr) => {
                 if (infoError) {
                     console.error(`Steghide Info Error: ${infoStderr}`);
