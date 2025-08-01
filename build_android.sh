@@ -4,6 +4,13 @@
 set -e
 
 # --- Environment Setup ---
+echo ">>> Cleaning up previous build environment..."
+# Remove apt lock files to prevent conflicts
+sudo rm -f /var/lib/apt/lists/lock
+sudo rm -f /var/cache/apt/archives/lock
+sudo rm -f /var/lib/dpkg/lock*
+sudo dpkg --configure -a
+
 echo ">>> Updating package lists..."
 sudo apt-get update -y
 
@@ -76,9 +83,9 @@ fi
 # Navigate to the Android project directory
 cd android_rat_source
 
-echo ">>> Starting Gradle build with memory optimization..."
-# Added --info, --stacktrace for better logging, and JVM args to limit memory usage.
-"${GRADLE_HOME}/bin/gradle" clean assembleDebug --no-daemon --info --stacktrace -Dorg.gradle.jvmargs="-Xmx512m -XX:MaxMetaspaceSize=256m"
+echo ">>> Starting Gradle build..."
+# Memory settings are now in gradle.properties
+"${GRADLE_HOME}/bin/gradle" clean assembleDebug --no-daemon --info --stacktrace
 
 echo ">>> Build finished successfully!"
 echo ">>> APK should be available at: app/build/outputs/apk/debug/app-debug.apk"
