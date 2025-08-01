@@ -18,7 +18,7 @@ if [ ! -f "${SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager" ]; then
     CMDLINE_TOOLS_URL="https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
     CMDLINE_ZIP="/tmp/cmdline-tools.zip"
 
-    wget -q "${CMDLINE_TOOLS_URL}" -O "${CMDLINE_ZIP}"
+    curl -s -L "${CMDLINE_TOOLS_URL}" -o "${CMDLINE_ZIP}"
     mkdir -p "${SDK_ROOT}/cmdline-tools"
     unzip -oq "${CMDLINE_ZIP}" -d "${SDK_ROOT}/cmdline-tools"
     mv "${SDK_ROOT}/cmdline-tools/cmdline-tools" "${SDK_ROOT}/cmdline-tools/latest"
@@ -44,7 +44,7 @@ GRADLE_HOME="${GRADLE_UNZIP_DIR}/gradle-${GRADLE_VERSION}"
 # Download and unzip Gradle if not already present
 if [ ! -f "${GRADLE_HOME}/bin/gradle" ]; then
     echo ">>> Gradle not found. Downloading and installing..."
-    wget -q "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" -O "${GRADLE_ZIP}"
+    curl -s -L "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" -o "${GRADLE_ZIP}"
     # Clean up old dir before unzipping
     rm -rf "${GRADLE_UNZIP_DIR}"
     mkdir -p "${GRADLE_UNZIP_DIR}"
