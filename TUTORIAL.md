@@ -15,9 +15,30 @@ RAT untuk Windows adalah program yang kuat yang memberi Anda kendali penuh atas 
 
 ### Langkah 2: Menjalankan RAT di Target
 
-1.  Kirim file `rat_client.exe` ke komputer target. Anda bisa menggunakan metode apa pun, seperti email, USB, atau layanan hosting file.
-2.  Jalankan file `.exe` di komputer target. Program akan berjalan di latar belakang tanpa menampilkan jendela apa pun.
-3.  Setelah dijalankan, RAT akan terhubung ke bot dan Anda akan menerima pesan konfirmasi.
+1.  Kirim file `rat_client.exe` ke komputer target.
+2.  Jalankan file `.exe` tersebut di komputer target. Setelah file dieksekusi, ia akan berjalan secara otomatis di latar belakang (tidak terlihat) dan terhubung ke bot.
+
+**Skenario dan Contoh Cara Eksekusi:**
+
+Agar target menjalankan file `.exe` tersebut, Anda perlu menggunakan teknik rekayasa sosial (social engineering). Tujuannya adalah meyakinkan target untuk mengunduh dan membuka file tersebut.
+
+*   **Skenario 1: Menyamarkan sebagai Dokumen Penting**
+    1.  Ubah nama file `rat_client.exe` menjadi sesuatu yang terlihat tidak berbahaya, misalnya `Laporan_Keuangan_Q3.exe` atau `Data_Gaji_Karyawan.exe`.
+    2.  Ubah ikon file `.exe` tersebut agar terlihat seperti ikon PDF atau Excel. Ini memerlukan software pihak ketiga seperti "Resource Hacker".
+    3.  Kirim file tersebut melalui email dengan subjek yang meyakinkan, contoh: "Mohon diperiksa laporan keuangan terbaru."
+
+*   **Skenario 2: Menyamarkan sebagai Installer Software**
+    1.  Buat sebuah file installer palsu menggunakan software seperti "WinRAR SFX" atau "7-Zip SFX".
+    2.  Bungkus `rat_client.exe` bersama dengan installer software yang asli (misalnya installer Notepad++).
+    3.  Konfigurasikan SFX agar mengekstrak dan menjalankan kedua file tersebut (installer asli dan RAT Anda) secara diam-diam.
+    4.  Beri nama file SFX tersebut `Notepad++_Installer.exe` dan kirimkan ke target. Saat target menjalankannya, Notepad++ akan terinstal seperti biasa, namun RAT Anda juga ikut berjalan di latar belakang.
+
+*   **Skenario 3: Melalui Tautan Unduhan**
+    1.  Upload file `rat_client.exe` ke layanan file hosting (contoh: MediaFire, Google Drive, dll).
+    2.  Gunakan layanan pemendek URL (seperti bit.ly) untuk menyamarkan tautan unduhan.
+    3.  Kirim tautan tersebut ke target melalui chat atau email dengan pesan yang menarik, contoh: "Cek aplikasi keren ini yang baru saya temukan!"
+
+**Penting:** Keberhasilan eksekusi sangat bergantung pada seberapa meyakinkan skenario yang Anda buat.
 
 ### Langkah 3: Mengontrol Target
 
