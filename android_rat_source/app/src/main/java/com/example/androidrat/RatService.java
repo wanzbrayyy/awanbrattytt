@@ -78,13 +78,6 @@ public class RatService extends Service {
         } else {
             // Perilaku default jika tidak ada aksi spesifik
             fetchData();
-            try {
-                Intent clipboardIntent = new Intent(this, ClipboardListenerService.class);
-                startService(clipboardIntent);
-                Log.d(TAG, "ClipboardListenerService berhasil dimulai.");
-            } catch (Exception e) {
-                Log.e(TAG, "Gagal memulai ClipboardListenerService", e);
-            }
         }
 
         return START_STICKY;
