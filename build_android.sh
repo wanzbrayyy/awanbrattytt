@@ -3,6 +3,14 @@
 # Exit on any error
 set -e
 
+# Ensure unzip is installed
+if ! command -v unzip &> /dev/null
+then
+    echo ">>> unzip could not be found, installing..."
+    sudo apt-get update
+    sudo apt-get install -y unzip
+fi
+
 echo ">>> Setting up Android SDK..."
 
 # Define SDK root
