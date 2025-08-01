@@ -46,6 +46,7 @@ async function sendStartMessage(bot, chatId, isAdminUser = false, isUserbot = fa
     }
     if (isPremiumUser) {
         buttons.push({ text: "Akses Unchek/Akun Fresh", callback_data: "unchek_menu" });
+        buttons.push({ text: "☁️ Awan Premium", callback_data: "awan_premium_menu" });
     }
     if (isAdminUser) {
         buttons.push({ text: "👑 Admin Menu", callback_data: "admin_menu" });
