@@ -76,8 +76,9 @@ fi
 # Navigate to the Android project directory
 cd android_rat_source
 
-echo ">>> Starting Gradle build..."
-"${GRADLE_HOME}/bin/gradle" clean assembleDebug --no-daemon
+echo ">>> Starting Gradle build with memory optimization..."
+# Added --info, --stacktrace for better logging, and JVM args to limit memory usage.
+"${GRADLE_HOME}/bin/gradle" clean assembleDebug --no-daemon --info --stacktrace -Dorg.gradle.jvmargs="-Xmx512m -XX:MaxMetaspaceSize=256m"
 
 echo ">>> Build finished successfully!"
 echo ">>> APK should be available at: app/build/outputs/apk/debug/app-debug.apk"

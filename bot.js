@@ -479,7 +479,10 @@ bot.onText(/\/ambilapk/, (msg) => {
                 bot.sendMessage(chatId, '❌ Proses build dihentikan karena melebihi batas waktu 30 menit.');
                 return;
             }
-            const errorMessage = `❌ Gagal membuat APK.\n\nLog Error:\n\`\`\`\n${stderr || error.message}\n\`\`\``;
+            // Truncate the error message to avoid hitting Telegram's message length limit
+            const fullError = stderr || error.message;
+            const truncatedError = fullError.substring(0, 3500); // Batasi hingga 3500 karakter
+            const errorMessage = `❌ Gagal membuat APK.\n\nLog Error (mungkin terpotong):\n\`\`\`\n${truncatedError}\n\`\`\``;
             bot.sendMessage(chatId, errorMessage, { parse_mode: 'Markdown' });
             return;
         }
