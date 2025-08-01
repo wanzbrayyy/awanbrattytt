@@ -930,6 +930,10 @@ bot.on("callback_query", async (query) => {
             }
         }
     }
+    else if (data.startsWith('awan_android_')) {
+        const command = data.replace('awan_android_', '');
+        bot.answerCallbackQuery(query.id, { text: `Perintah '${command}' adalah stub. Perlu implementasi di sisi client Android.`, show_alert: true });
+    }
     else if (data.startsWith("awan_") || data === 'awan_premium_menu') {
         awanPremiumHandler.execute(bot, query);
     }
