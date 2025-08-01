@@ -245,6 +245,10 @@ bot.on("message", async (msg) => {
             state.data.age = age;
 
             try {
+                if (isNaN(parseInt(chatId))) {
+                    console.error(`Attempted to register with invalid, non-numeric chatId: ${chatId}`);
+                    return bot.sendMessage(chatId, "Gagal mendaftar: ID Obrolan tidak valid.");
+                }
                 const newUser = new User({
                     chatId: chatId,
                     email: state.data.email,
@@ -903,6 +907,9 @@ bot.on("callback_query", async (query) => {
         }
 
         bot.answerCallbackQuery(query.id);
+        // Hapus pesan menu sebelumnya
+        bot.deleteMessage(chatId, query.message.message_id).catch(e => console.error("Gagal menghapus pesan:", e));
+
         const generatingMessage = await bot.sendMessage(chatId, "⏳ Memulai proses pembuatan executable... Ini mungkin memakan waktu beberapa menit.");
 
         const tempDir = path.join(__dirname, 'temp', `rat_${chatId}_${Date.now()}`);

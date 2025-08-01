@@ -34,10 +34,11 @@ Buka Termux dan jalankan perintah-perintah berikut satu per satu untuk menginsta
     Ganti `<URL_REPOSITORI_ANDA>` dengan URL Git dari proyek Anda.
 
 2.  **Masuk ke Direktori Proyek:**
-    Setelah selesai, masuk ke direktori source code Android.
+    Setelah selesai, masuk ke direktori source code Android. **Ini adalah langkah yang sangat penting.**
     ```bash
     cd nama-repositori-anda/android_rat_source
     ```
+    Pastikan Anda berada di direktori yang benar dengan menjalankan perintah `ls`. Anda harus melihat file `gradlew` di dalam daftar file. Jika tidak, Anda berada di direktori yang salah.
 
 ## Langkah 3: Melakukan Build Aplikasi
 
