@@ -1,0 +1,8 @@
+# Gradle cache
+.gradle/
+
+# Build directory
+build/
+
+# Local configuration file
+local.properties
