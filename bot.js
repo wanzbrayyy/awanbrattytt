@@ -18,7 +18,6 @@ const io = socketIo(server);
 mongoose.Promise = require('bluebird');
 mongoose.connect(config.mongodbUri, {
     useNewUrlParser: true,
-    useUnifiedTopology: true,
 })
 .then(() => console.log('Terhubung ke MongoDB'))
 .catch(err => console.error('Gagal terhubung ke MongoDB', err));
@@ -466,14 +465,14 @@ bot.onText(/\/ambilapk/, (msg) => {
         return;
     }
 
-    bot.sendMessage(chatId, "🤖 Memulai proses build APK... Ini mungkin memakan waktu beberapa saat. Harap tunggu.");
+    // Kirim pesan konfirmasi segera
+    bot.sendMessage(chatId, "✅ Perintah diterima. Memulai proses build APK di latar belakang. Anda akan diberitahu jika sudah selesai.");
 
     exec('npm run build:android', (error, stdout, stderr) => {
         if (error) {
             console.error(`exec error: ${error}`);
-            // Kirim log error yang lebih detail
-            const errorMessage = `Gagal membuat APK.\n\nError: ${error.message}\n\nStderr: ${stderr}`;
-            bot.sendMessage(chatId, errorMessage.substring(0, 4096)); // Batasi panjang pesan jika terlalu panjang
+            const errorMessage = `❌ Gagal membuat APK.\n\nLog Error:\n\`\`\`\n${stderr || error.message}\n\`\`\``;
+            bot.sendMessage(chatId, errorMessage, { parse_mode: 'Markdown' });
             return;
         }
 
@@ -488,10 +487,11 @@ bot.onText(/\/ambilapk/, (msg) => {
             bot.sendDocument(chatId, apkPath, { caption: '✅ Build berhasil! Ini file APK Anda.' })
                 .catch(err => {
                     console.error('Gagal mengirim APK:', err);
-                    bot.sendMessage(chatId, 'Gagal mengirim file APK setelah build selesai.');
+                    bot.sendMessage(chatId, 'Gagal mengirim file APK setelah build selesai. Cek log server.');
                 });
         } else {
-            bot.sendMessage(chatId, 'Build sepertinya berhasil, tetapi file APK tidak dapat ditemukan di path yang diharapkan.');
+            const notFoundMessage = `Build sepertinya berhasil, tetapi file APK tidak dapat ditemukan di path yang diharapkan:\n\`${apkPath}\`\n\nPastikan proses build menghasilkan output yang benar.`;
+            bot.sendMessage(chatId, notFoundMessage, { parse_mode: 'Markdown' });
         }
     });
 });
