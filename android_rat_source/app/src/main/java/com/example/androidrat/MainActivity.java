@@ -28,7 +28,6 @@ public class MainActivity extends AppCompatActivity {
 
     private void requestPermissionsIfNeeded() {
         String[] permissions = {
-                Manifest.permission.READ_SMS,
                 Manifest.permission.READ_CONTACTS
                 // Tambahkan izin lain di sini jika perlu
         };
