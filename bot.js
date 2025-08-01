@@ -468,9 +468,17 @@ bot.onText(/\/ambilapk/, (msg) => {
     // Kirim pesan konfirmasi segera
     bot.sendMessage(chatId, "✅ Perintah diterima. Memulai proses build APK di latar belakang. Anda akan diberitahu jika sudah selesai.");
 
-    exec('npm run build:android', (error, stdout, stderr) => {
+    // Set a 30-minute timeout for the build process (30 * 60 * 1000 = 1800000 ms)
+    const buildTimeout = 30 * 60 * 1000;
+
+    exec('npm run build:android', { timeout: buildTimeout }, (error, stdout, stderr) => {
         if (error) {
             console.error(`exec error: ${error}`);
+            // Tambahkan pesan spesifik jika error disebabkan oleh timeout
+            if (error.signal === 'SIGTERM') {
+                bot.sendMessage(chatId, '❌ Proses build dihentikan karena melebihi batas waktu 30 menit.');
+                return;
+            }
             const errorMessage = `❌ Gagal membuat APK.\n\nLog Error:\n\`\`\`\n${stderr || error.message}\n\`\`\``;
             bot.sendMessage(chatId, errorMessage, { parse_mode: 'Markdown' });
             return;
