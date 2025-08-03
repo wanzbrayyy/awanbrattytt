@@ -18,6 +18,7 @@ const TrackedLink = require('./models/trackedLink');
 const QRCode = require('qrcode');
 const Jimp = require('jimp');
 const { createInlineKeyboard, isAdmin, sendStartMessage, showProductDetail, sendAwanStartMessage } = require('./utils');
+const { handleYoutubeTools, handleYoutubeMessage, userStates: youtubeUserStates } = require('./commands/youtube');
 const awanPremiumHandler = require('./commands/awan_premium');
 const DoxwareSimulation = require('./models/doxwareSimulation');
 const natural = require('natural');
@@ -127,6 +128,11 @@ bot.on("message", async (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     const text = msg.text;
+
+    if (youtubeUserStates[chatId]) {
+        handleYoutubeMessage(bot, msg);
+        return;
+    }
 
     const state = userStates[chatId];
 
@@ -737,7 +743,8 @@ bot.on("callback_query", async (query) => {
   const data = query.data;
 
   try {
-    if (data === "product") showCategories(chatId);
+    if (data === "youtube_tools") handleYoutubeTools(bot, chatId);
+    else if (data === "product") showCategories(chatId);
     else if (data === "register") registerUser(chatId, userId);
     else if (data === "profile") showUserProfile(chatId, userId);
     else if (data.startsWith("category_")) {
