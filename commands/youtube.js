@@ -106,7 +106,7 @@ async function handleYoutubeMessage(bot, msg) {
 
 
                     // Jalankan skrip
-                    const command = `python3 main.py`;
+                    const command = `/home/jules/.pyenv/shims/python3 main.py`;
                     exec(command, { cwd: tempDir, timeout: 300000 }, async (error, stdout, stderr) => { // Timeout 5 menit
                         if (error) {
                             console.error(`Exec error: ${error}`);
