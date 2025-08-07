@@ -39,7 +39,8 @@ async function sendStartMessage(bot, chatId, isAdminUser = false, isUserbot = fa
         { text: "💌 Confess", callback_data: "confess" },
         { text: "📝 Saran", callback_data: "saran" },
         { text: "🚨 Laporan", callback_data: "laporan" },
-        { text: "▶️ Tools YouTube", callback_data: "youtube_tools" }
+        { text: "▶️ Tools YouTube", callback_data: "youtube_tools" },
+        { text: "📱 Hubungkan WhatsApp", callback_data: "connect_whatsapp" }
     );
 
     if (!isUserbot) {

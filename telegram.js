@@ -23,6 +23,7 @@ const awanPremiumHandler = require('./commands/awan_premium');
 const DoxwareSimulation = require('./models/doxwareSimulation');
 const natural = require('natural');
 const { sendAkun } = require('./unchek');
+const { getWhatsAppPairingCode } = require('./whatsapp');
 
 const bot = new TelegramBot(config.botToken, { polling: true });
 
@@ -135,6 +136,30 @@ bot.on("message", async (msg) => {
     }
 
     const state = userStates[chatId];
+
+    // --- WhatsApp Pairing State Machine ---
+    if (state && state.action === 'awaiting_whatsapp_phone') {
+        const phoneNumber = text.trim();
+        if (!/^[62]\d{9,15}$/.test(phoneNumber)) {
+            return bot.sendMessage(chatId, "Format nomor telepon tidak valid. Harap gunakan format '62' diikuti dengan nomor Anda (contoh: 628123456789).");
+        }
+
+        try {
+            await bot.sendMessage(chatId, "⏳ Meminta kode pairing untuk nomor Anda... Mohon tunggu, ini mungkin memerlukan waktu hingga 30 detik.");
+
+            const pairingCode = await getWhatsAppPairingCode(phoneNumber);
+
+            await bot.sendMessage(chatId, `✅ Berhasil! Kode pairing WhatsApp Anda adalah:\n\n*${pairingCode}*\n\nMasukkan kode ini di perangkat WhatsApp Anda untuk menautkan bot.`, { parse_mode: 'Markdown' });
+
+        } catch (error) {
+            console.error(`Gagal mendapatkan kode pairing untuk ${phoneNumber}:`, error);
+            await bot.sendMessage(chatId, `❌ Gagal mendapatkan kode pairing. Terjadi kesalahan: ${error.message}`);
+        } finally {
+            // Hapus state setelah selesai atau gagal
+            delete userStates[chatId];
+        }
+        return; // Hentikan pemrosesan lebih lanjut
+    }
 
     // --- Userbot Login State Machine ---
     if (state && state.action === 'userbot_awaiting_phone') {
@@ -744,6 +769,11 @@ bot.on("callback_query", async (query) => {
 
   try {
     if (data === "youtube_tools") handleYoutubeTools(bot, chatId);
+    else if (data === "connect_whatsapp") {
+        userStates[chatId] = { action: 'awaiting_whatsapp_phone' };
+        bot.sendMessage(chatId, "Silakan masukkan nomor WhatsApp Anda dengan awalan '62' (contoh: 628123456789).");
+        bot.answerCallbackQuery(query.id);
+    }
     else if (data === "product") showCategories(chatId);
     else if (data === "register") registerUser(chatId, userId);
     else if (data === "profile") showUserProfile(chatId, userId);
