@@ -137,6 +137,108 @@ bot.on("message", async (msg) => {
 
     const state = userStates[chatId];
 
+    // --- Feedback Conversation State Machine ---
+    if (state && state.action === 'awaiting_feedback') {
+        const feedbackText = text;
+        const userId = msg.from.id;
+        const username = msg.from.username ? `@${msg.from.username}` : (msg.from.first_name || 'Pengguna');
+
+        try {
+            const Feedback = require('./models/feedback');
+            const newFeedback = new Feedback({ userId, username, feedbackText });
+            await newFeedback.save();
+
+            bot.sendMessage(chatId, '✅ **Terima kasih!**\n\nMasukan Anda telah kami terima dan akan sangat membantu kami untuk berkembang menjadi lebih baik lagi. ✨');
+
+            const adminNotification = `
+- - - - - - - - - - - - - -
+📮 **FEEDBACK BARU** 📮
+- - - - - - - - - - - - - -
+👤 **Dari:**
+   - **User:** ${username}
+   - **ID:** \`${userId}\`
+
+💬 **Pesan:**
+${feedbackText}
+- - - - - - - - - - - - - -
+`;
+            const keyboard = createInlineKeyboard([
+                { text: '✍️ Balas Pesan Ini', callback_data: `admin_reply_to_feedback_${userId}` }
+            ]);
+            bot.sendMessage(config.adminId, adminNotification, { parse_mode: 'Markdown', reply_markup: keyboard });
+
+        } catch (error) {
+            console.error("Gagal menyimpan feedback:", error);
+            bot.sendMessage(chatId, 'Maaf, terjadi kesalahan saat menyimpan masukan Anda. Silakan coba lagi nanti.');
+        } finally {
+            delete userStates[chatId];
+        }
+        return;
+    }
+
+    if (state && state.action === 'awaiting_admin_reply') {
+        const adminReplyText = text;
+        const targetUserId = state.targetUserId;
+
+        const userMessage = `
+- - - - - - - - - - - - - -
+📬 **BALASAN DARI ADMIN** 📬
+- - - - - - - - - - - - - -
+Halo! Admin telah membalas feedback yang Anda kirimkan.
+
+💬 **Pesan Balasan:**
+${adminReplyText}
+- - - - - - - - - - - - - -
+`;
+        const keyboard = createInlineKeyboard([
+            { text: '✍️ Balas ke Admin', callback_data: `user_reply_to_admin` }
+        ]);
+
+        try {
+            await bot.sendMessage(targetUserId, userMessage, { parse_mode: 'Markdown', reply_markup: keyboard });
+            bot.sendMessage(chatId, `✅ Balasan Anda telah berhasil dikirim ke pengguna ID: ${targetUserId}.`);
+        } catch (error) {
+            console.error(`Gagal mengirim balasan ke user ${targetUserId}:`, error);
+            bot.sendMessage(chatId, `❌ Gagal mengirim balasan. Mungkin pengguna telah memblokir bot.`);
+        } finally {
+            delete userStates[chatId];
+        }
+        return;
+    }
+
+    if (state && state.action === 'awaiting_user_reply') {
+        const userReplyText = text;
+        const adminId = config.adminId;
+        const username = msg.from.username ? `@${msg.from.username}` : (msg.from.first_name || 'Pengguna');
+
+        const adminNotification = `
+- - - - - - - - - - - - - -
+↩️ **BALASAN FEEDBACK DARI PENGGUNA** ↩️
+- - - - - - - - - - - - - -
+👤 **Dari:**
+   - **User:** ${username}
+   - **ID:** \`${chatId}\`
+
+💬 **Pesan:**
+${userReplyText}
+- - - - - - - - - - - - - -
+`;
+        const keyboard = createInlineKeyboard([
+            { text: '✍️ Balas Lagi', callback_data: `admin_reply_to_feedback_${chatId}` }
+        ]);
+
+        try {
+            await bot.sendMessage(adminId, adminNotification, { parse_mode: 'Markdown', reply_markup: keyboard });
+            bot.sendMessage(chatId, `✅ Pesan balasan Anda telah terkirim ke Admin.`);
+        } catch (error) {
+            console.error(`Gagal mengirim balasan ke admin:`, error);
+            bot.sendMessage(chatId, `❌ Gagal mengirim balasan ke admin.`);
+        } finally {
+            delete userStates[chatId];
+        }
+        return;
+    }
+
     // --- WhatsApp Pairing State Machine ---
     if (state && state.action === 'awaiting_whatsapp_phone') {
         const phoneNumber = text.trim();
@@ -543,26 +645,41 @@ ${ransomNote}
             const startPayload = args;
 
             try {
-                const user = await User.findOne({ chatId });
+                let user = await User.findOne({ chatId });
 
-                // Jika pengguna tidak ada, mulai alur pendaftaran
+                // Jika pengguna tidak ada, buat pengguna baru secara otomatis
                 if (!user) {
-                    userStates[chatId] = { action: 'awaiting_registration_email', data: {} };
-                    await bot.sendMessage(chatId, "👋 Selamat datang! Sepertinya Anda pengguna baru. Mari kita daftar.\n\nSilakan masukkan alamat email Anda:");
+                    console.log(`Pengguna baru dengan ID: ${chatId}. Mendaftarkan secara otomatis...`);
+                    user = new User({
+                        chatId: chatId,
+                        username: msg.from.username,
+                        type: msg.chat.type,
+                        joinDate: moment().format(),
+                        daftar: true // Langsung set `daftar` ke true
+                    });
+                    await user.save();
+                    await bot.sendMessage(chatId, `👋 Selamat datang, @${msg.from.username}! Akun Anda telah dibuat secara otomatis.`);
                 } else {
-                    // Jika pengguna sudah ada
-                    if (startPayload === 'awan') {
-                        if (user.isPremium) {
-                            sendAwanStartMessage(bot, chatId);
-                        } else {
-                            bot.sendMessage(chatId, "Fitur 'awan' hanya untuk pengguna premium.");
-                        }
-                    } else if (startPayload) {
-                        showProductDetail(bot, chatId, startPayload);
-                    } else {
-                        sendStartMessage(bot, chatId, isAdmin(userId), false, user.isPremium);
+                    // Opsional: Perbarui username jika berubah
+                    if (msg.from.username && user.username !== msg.from.username) {
+                        user.username = msg.from.username;
+                        await user.save();
                     }
                 }
+
+                // Logika penanganan payload start
+                if (startPayload === 'awan') {
+                    if (user.isPremium) {
+                        sendAwanStartMessage(bot, chatId);
+                    } else {
+                        bot.sendMessage(chatId, "Fitur 'awan' hanya untuk pengguna premium.");
+                    }
+                } else if (startPayload) {
+                    showProductDetail(bot, chatId, startPayload);
+                } else {
+                    sendStartMessage(bot, chatId, isAdmin(userId), false, user.isPremium);
+                }
+
             } catch (error) {
                 console.error("Gagal menangani /start:", error);
                 bot.sendMessage(chatId, "Terjadi kesalahan saat memproses perintah.");
@@ -1205,43 +1322,26 @@ Jangan coba-coba mematikan atau me-reboot perangkat Anda, karena ini dapat menye
     else if (data === "download_menu") showDownloadMenu(chatId);
     else if (data === "tiktok_v2") handleTikTokV2(chatId);
     else if (data === "twitter") handleTwitter(chatId);
-    else if (data.startsWith("reply_feedback_")) {
-      const targetUserId = data.split("_")[2];
+    else if (data === 'give_feedback') {
+        userStates[chatId] = { action: 'awaiting_feedback' };
+        bot.sendMessage(chatId, '📝 Silakan ketik dan kirimkan masukan Anda untuk bot ini. Admin akan meninjaunya sesegera mungkin.');
+        bot.answerCallbackQuery(query.id);
+    }
+    else if (data.startsWith("admin_reply_to_feedback_")) {
+        const targetUserId = data.split("_")[4];
 
-      if (userId.toString() !== config.adminId) {
-          return bot.answerCallbackQuery(query.id, { text: 'Anda tidak diizinkan untuk melakukan tindakan ini.', show_alert: true });
-      }
+        if (userId.toString() !== config.adminId) {
+            return bot.answerCallbackQuery(query.id, { text: 'Anda tidak diizinkan untuk melakukan tindakan ini.', show_alert: true });
+        }
 
-      bot.sendMessage(chatId, `✍️ Silakan ketik balasan Anda untuk pengguna dengan ID: ${targetUserId}`);
-
-      bot.once('message', async (replyMsg) => {
-          if (replyMsg.from.id.toString() !== config.adminId) {
-              return;
-          }
-
-          const replyText = replyMsg.text;
-
-          const userMessage = `
-- - - - - - - - - - - - - -
-📬 **BALASAN DARI ADMIN** 📬
-- - - - - - - - - - - - - -
-Halo! Admin telah membalas feedback yang Anda kirimkan.
-
-💬 **Pesan Balasan:**
-${replyText}
-
-- - - - - - - - - - - - - -
-Terima kasih telah memberikan masukan!
-`;
-
-          try {
-              await bot.sendMessage(targetUserId, userMessage, { parse_mode: 'Markdown' });
-              bot.sendMessage(chatId, `✅ Balasan Anda telah berhasil dikirim ke pengguna ID: ${targetUserId}.`);
-          } catch (error) {
-              console.error(`Gagal mengirim balasan ke user ${targetUserId}:`, error);
-              bot.sendMessage(chatId, `❌ Gagal mengirim balasan. Mungkin pengguna telah memblokir bot.`);
-          }
-      });
+        userStates[chatId] = { action: 'awaiting_admin_reply', targetUserId: targetUserId };
+        bot.sendMessage(chatId, `✍️ Silakan ketik balasan Anda untuk pengguna dengan ID: ${targetUserId}`);
+        bot.answerCallbackQuery(query.id);
+    }
+    else if (data === 'user_reply_to_admin') {
+        userStates[chatId] = { action: 'awaiting_user_reply' };
+        bot.sendMessage(chatId, '✍️ Silakan ketik balasan Anda untuk Admin.');
+        bot.answerCallbackQuery(query.id);
     }
     bot.answerCallbackQuery(query.id);
   } catch (error) {
@@ -1864,15 +1964,37 @@ bot.onText(/\/broadcast( .*)?/, async (msg, match) => {
       return bot.sendMessage(chatId, "Tidak ada pengguna untuk target ini.");
     }
 
-    const formattedMessage = `||${broadcastMessage}||`;
-    const sentMessage = await bot.sendMessage(chatId, `\`\`\`${formattedMessage}\`\`\``, { parse_mode: "Markdown" });
-
     let successCount = 0;
     let failureCount = 0;
 
+    // Cek apakah ada link di dalam pesan broadcast
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
+    const foundUrls = broadcastMessage.match(urlRegex);
+
+    let options = {
+        parse_mode: 'Markdown'
+    };
+
+    if (foundUrls && foundUrls.length > 0) {
+        // Ambil URL pertama yang ditemukan
+        const url = foundUrls[0];
+        const keyboard = {
+            inline_keyboard: [
+                [
+                    {
+                        text: 'Masuk ke Link',
+                        url: url
+                    }
+                ]
+            ]
+        };
+        options.reply_markup = keyboard;
+    }
+
     for (const user of users) {
         try {
-            await bot.forwardMessage(user.chatId, chatId, sentMessage.message_id);
+            // Kirim pesan langsung ke setiap pengguna, bukan forward
+            await bot.sendMessage(user.chatId, broadcastMessage, options);
             successCount++;
         } catch (error) {
             failureCount++;
@@ -2475,68 +2597,6 @@ async function handleConfess(chatId) {
   });
 }
 
-// Feedback Command
-bot.onText(/\/feedback/, (msg) => {
-    const chatId = msg.chat.id;
-
-    bot.sendMessage(chatId, '📝 Silakan ketik dan kirimkan masukan Anda untuk bot ini. Admin akan meninjaunya sesegera mungkin.');
-
-    bot.once('message', async (feedbackMsg) => {
-        if (feedbackMsg.chat.id !== chatId || (feedbackMsg.text && feedbackMsg.text.startsWith('/'))) {
-            return;
-        }
-
-        const feedbackText = feedbackMsg.text;
-        const userId = feedbackMsg.from.id;
-        const username = feedbackMsg.from.username ? `@${feedbackMsg.from.username}` : (feedbackMsg.from.first_name || 'Pengguna');
-
-        try {
-            const Feedback = require('./models/feedback'); // Moved require here
-            const newFeedback = new Feedback({
-                userId,
-                username,
-                feedbackText
-            });
-
-            await newFeedback.save();
-
-            bot.sendMessage(chatId, '✅ **Terima kasih!**\n\nMasukan Anda telah kami terima dan akan sangat membantu kami untuk berkembang menjadi lebih baik lagi. ✨');
-
-            const adminNotification = `
-- - - - - - - - - - - - - -
-📮 **FEEDBACK BARU** 📮
-- - - - - - - - - - - - - -
-👤 **Dari:**
-   - **User:** ${username}
-   - **ID:** \`${userId}\`
-
-💬 **Pesan:**
-${feedbackText}
-- - - - - - - - - - - - - -
-`;
-
-            const keyboard = {
-                inline_keyboard: [
-                    [
-                        {
-                            text: '✍️ Balas Pesan Ini',
-                            callback_data: `reply_feedback_${userId}`
-                        }
-                    ]
-                ]
-            };
-
-            bot.sendMessage(config.adminId, adminNotification, {
-                parse_mode: 'Markdown',
-                reply_markup: keyboard
-            });
-
-        } catch (error) {
-            console.error("Gagal menyimpan feedback:", error);
-            bot.sendMessage(chatId, 'Maaf, terjadi kesalahan saat menyimpan masukan Anda. Silakan coba lagi nanti.');
-        }
-    });
-});
 
 const classifier = new natural.BayesClassifier();
 
