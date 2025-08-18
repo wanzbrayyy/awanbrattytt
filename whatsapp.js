@@ -4,7 +4,7 @@ const {
     Browsers,
     delay,
     makeCacheableSignalKeyStore
-} = require('@adiwajshing/baileys');
+} = require('@fizzxydev/baileys-pro');
 const pino = require('pino');
 const fs = require('fs');
 const path = require('path');
