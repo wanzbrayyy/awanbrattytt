@@ -11,6 +11,7 @@
   "dependencies": {
     "@airgram/api": "^1.2.0",
     "@faker-js/faker": "^9.9.0",
+    "@fizzxydev/baileys-pro": "^8.7.2",
     "@telepilotco/tdl": "^7.4.1",
     "axios": "^1.10.0",
     "bluebird": "^3.7.2",
