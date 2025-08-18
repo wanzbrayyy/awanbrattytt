@@ -1,5 +1,5 @@
 module.exports = {
-  botToken: "8121574706:AAHOO0IRa7Ni39_3MNaFO92WtinrrrM0t5o",
+  botToken: "7377371355:AAFVrCTvBk0tBE_5E8IQlGxXdnLNtjBQRHo",
   adminId: "7774371395",
   mongodbUri: "mongodb+srv://zanssxploit:pISqUYgJJDfnLW9b@cluster0.fgram.mongodb.net/scmarket_db?retryWrites=true&w=majority",
   ownerName: "wanzofc",
