@@ -815,19 +815,6 @@ ${ransomNote}
         return;
     }
 
-    if (newGroupMembers[chatId] && newGroupMembers[chatId][userId]) {
-        const recaptchaCode = newGroupMembers[chatId][userId];
-        if (parseInt(text) === recaptchaCode) {
-            delete newGroupMembers[chatId][userId];
-            bot.sendMessage(chatId, `Selamat, Anda telah lolos verifikasi!`);
-        } else {
-            bot.kickChatMember(chatId, userId);
-            bot.sendMessage(chatId, `Kode reCAPTCHA salah. Anda dikeluarkan dari grup.`);
-        }
-        return;
-    }
-});
-
 bot.onText(/\/setwelcome (.+)/, async (msg, match) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
