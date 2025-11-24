@@ -639,7 +639,7 @@ ${ransomNote}
             delete newGroupMembers[chatId][userId];
             bot.sendMessage(chatId, `Selamat, Anda telah lolos verifikasi!`);
         } else {
-            bot.kickChatMember(chatId, userId);
+            bot.banChatMember(chatId, userId);
             bot.sendMessage(chatId, `Kode reCAPTCHA salah. Anda dikeluarkan dari grup.`);
         }
         return;
