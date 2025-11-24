@@ -4,7 +4,7 @@
   "description": "Telegram bot untuk Wanzofc Shop",
   "main": "bot.js",
   "scripts": {
-    "prestart": "sudo apt-get update && sudo apt-get install -y steghide",
+    "prestart": "",
     "start": "node bot.js",
     "build:android": "bash ./build_android.sh"
   },
